@@ -55,3 +55,48 @@ class TestLocalFileStorage:
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = LocalFileStorage(base_dir=tmpdir)
             storage.delete("/nonexistent/path.csv")
+            # no raise
+
+    def test_read_chunks_with_header_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage = LocalFileStorage(base_dir=tmpdir)
+            content = (
+                b"Email,Subscription Date,Website\n"
+                b"alice@test.com,2020-08-24,http://example.com\n"
+            )
+            path = storage.save("customers.csv", content)
+
+            chunks = list(
+                storage.read_chunks(
+                    path,
+                    chunk_size=1,
+                    header_mapping={
+                        "Email": "email",
+                        "Subscription Date": "subscription_date",
+                        "Website": "website",
+                    },
+                )
+            )
+            assert chunks[0] == [
+                {
+                    "email": "alice@test.com",
+                    "subscription_date": "2020-08-24",
+                    "website": "http://example.com",
+                }
+            ]
+
+    def test_read_chunk_with_header_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage = LocalFileStorage(base_dir=tmpdir)
+            content = b"Email,Website\nalice@test.com,http://example.com\n"
+            path = storage.save("customers.csv", content)
+
+            chunk = storage.read_chunk(
+                path,
+                chunk_size=1,
+                offset=0,
+                header_mapping={"Email": "email", "Website": "website"},
+            )
+            assert chunk == [
+                {"email": "alice@test.com", "website": "http://example.com"}
+            ]
