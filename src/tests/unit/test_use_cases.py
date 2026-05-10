@@ -91,7 +91,7 @@ class TestProcessChunk:
         task_repo = FakeTaskRepository()
         customer_repo = FakeCustomerRepository()
         error_repo = FakeErrorRepository()
-        task = ProcessingTask(id=uuid4(), status=TaskStatus.PENDING)
+        task = ProcessingTask(id=uuid4(), status=TaskStatus.PENDING, total_rows=2)
         task_repo.save(task)
         use_case = self._make_use_case(task_repo, customer_repo, error_repo)
 
@@ -114,7 +114,7 @@ class TestProcessChunk:
         assert len(customer_repo._customers) == 2
         assert len(error_repo._errors) == 0
         assert task_repo.get(task.id).processed_rows == 2
-        assert task_repo.get(task.id).status == TaskStatus.PROCESSING
+        assert task_repo.get(task.id).status == TaskStatus.COMPLETED
 
     def test_separates_valid_and_invalid_rows(self) -> None:
         task_repo = FakeTaskRepository()

@@ -99,6 +99,8 @@ class ProcessChunk:
             self._customer_repo.add_bulk(valid)
             self._error_repo.add_bulk(errors)
             task.advance_progress(len(rows))
+            if task.total_rows is not None and task.processed_rows >= task.total_rows:
+                task.transition_to(TaskStatus.COMPLETED)
             self._task_repo.save(task)
             self._uow.commit()
 

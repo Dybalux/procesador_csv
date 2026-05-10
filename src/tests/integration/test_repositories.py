@@ -215,3 +215,95 @@ class TestSQLAlchemyErrorRepository:
         assert repo.list_by_task(task_a)[0].reason == "err A"
         assert len(repo.list_by_task(task_b)) == 1
         assert repo.list_by_task(task_b)[0].reason == "err B"
+
+
+# TODO: Instalar testcontainers para ejecutar tests con PostgreSQL real.
+# Ejemplo: pip install testcontainers[postgres]
+
+
+class TestWithPostgreSQL:
+    """Tests de integración con PostgreSQL vía testcontainers.
+
+    Se saltan automáticamente si ``testcontainers`` no está instalado.
+    """
+
+    @pytest.fixture(scope="class")
+    def pg_engine(self):
+        """Levanta un contenedor PostgreSQL y retorna el engine SQLAlchemy."""
+        pytest.importorskip("testcontainers", reason="testcontainers not installed")
+        from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
+
+        with PostgresContainer("postgres:15") as postgres:
+            engine = create_engine(postgres.get_connection_url())
+            Base.metadata.create_all(bind=engine)
+            yield engine
+
+    @pytest.fixture
+    def pg_session(self, pg_engine):
+        """Sesión SQLAlchemy sobre el contenedor PostgreSQL."""
+        from sqlalchemy.orm import sessionmaker
+
+        TestingSessionLocal = sessionmaker(
+            autocommit=False, autoflush=False, bind=pg_engine
+        )
+        session = TestingSessionLocal()
+        yield session
+        session.rollback()
+        session.close()
+
+    def test_task_repo_save_and_get_with_postgres(self, pg_session) -> None:
+        repo = SQLAlchemyTaskRepository(pg_session)
+        task = ProcessingTask(
+            id=uuid4(),
+            status=TaskStatus.PENDING,
+            total_rows=100,
+            file_path="/tmp/test.csv",
+        )
+        repo.save(task)
+        pg_session.commit()
+
+        found = repo.get(task.id)
+        assert found is not None
+        assert found.status == TaskStatus.PENDING
+        assert found.total_rows == 100
+
+    def test_customer_repo_add_bulk_with_postgres(self, pg_session) -> None:
+        task_id = uuid4()
+        repo = SQLAlchemyCustomerRepository(pg_session, task_id=task_id)
+        customers = [
+            Customer(
+                id=uuid4(),
+                email=Email("alice@example.com"),
+                website=Url("https://example.com"),
+                subscription_date=SubscriptionDate(date(2024, 1, 15)),
+            ),
+            Customer(
+                id=uuid4(),
+                email=Email("bob@example.com"),
+                website=Url("https://bob.dev"),
+                subscription_date=SubscriptionDate(date(2024, 2, 20)),
+            ),
+        ]
+        repo.add_bulk(customers)
+        pg_session.commit()
+
+        assert repo.count_by_task(task_id) == 2
+
+    def test_error_repo_add_bulk_with_postgres(self, pg_session) -> None:
+        task_id = uuid4()
+        repo = SQLAlchemyErrorRepository(pg_session)
+        errors = [
+            RowValidationError(
+                id=uuid4(),
+                task_id=task_id,
+                row_number=1,
+                raw_data={"email": "bad"},
+                reason="Invalid email",
+            ),
+        ]
+        repo.add_bulk(errors)
+        pg_session.commit()
+
+        found = repo.list_by_task(task_id)
+        assert len(found) == 1
+        assert found[0].reason == "Invalid email"
