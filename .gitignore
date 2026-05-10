@@ -36,3 +36,6 @@ Thumbs.db
 data/
 postgres_data/
 redis_data/
+
+# Dataset de trabajo
+customers-100.csv
