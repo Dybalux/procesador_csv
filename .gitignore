@@ -39,6 +39,8 @@ redis_data/
 
 # Dataset de trabajo
 customers-100.csv
+customers-1000.csv
+customers-1000_2.csv
 
 # OpenCode metadata
 .atl/
