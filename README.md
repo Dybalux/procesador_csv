@@ -266,7 +266,7 @@ Toda la configuración se realiza mediante **variables de entorno** (principio 1
 | `CELERY_CONCURRENCY` | `4` | Número de workers de Celery ejecutándose en paralelo |
 | `CELERY_WORKER_PREFETCH_MULTIPLIER` | `1` | Cuántas tareas reserva cada worker por adelantado |
 
-#### Procesamiento de CSV (`src/infrastructure/celery/tasks.py`, `src/infrastructure/web/routers/upload.py`)
+#### Procesamiento de CSV (`src/infrastructure/celery/tasks.py`, `src/api/v1/endpoints/upload.py`)
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
@@ -386,8 +386,7 @@ procesador_csv/
 ├── Dockerfile                  # Multi-stage build con Alpine
 ├── docker-entrypoint.sh        # Entrypoint para permisos non-root
 ├── alembic.ini                 # Configuración Alembic
-├── requirements.txt            # Dependencias Python
-├── pyproject.toml             # Configuración proyecto
+├── pyproject.toml              # Dependencias + configuración proyecto
 ├── migrations/                 # Migraciones Alembic
 │   ├── env.py
 │   └── versions/
