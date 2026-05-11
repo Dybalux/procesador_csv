@@ -3,54 +3,36 @@
 from __future__ import annotations
 
 from io import BytesIO
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 
-from domain.entities import ProcessingTask, TaskStatus
-from tests.unit.fakes import FakeFileStorage, FakeTaskRepository
 
-
-def _make_app():
-    import os
+@pytest.fixture
+def client(postgres_container: Any, file_storage: Any) -> tuple[TestClient, Any]:
+    """Crea app FastAPI con PostgreSQL real."""
     import sys
 
-    # Force reimport of infrastructure modules with SQLite config
+    # Limpiar módulos para forzar reimport con nueva DB URL
     for key in list(sys.modules.keys()):
-        if (
-            key.startswith("infrastructure")
-            or key.startswith("api")
-            or key.startswith("application")
-        ):
+        if key.startswith("infrastructure.web") or key.startswith("infrastructure.db"):
             del sys.modules[key]
 
-    os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-    os.environ["CELERY_BROKER_URL"] = "redis://localhost:6379/0"
-
-    # Import in correct order to ensure dependencies are loaded
-    from infrastructure.db import connection  # noqa: F401
-    from infrastructure.web.dependencies import get_file_storage, get_task_repo
+    from infrastructure.storage.local_file_storage import LocalFileStorage
+    from infrastructure.web.dependencies import get_file_storage
     from infrastructure.web.main import create_app
 
     app = create_app()
-    return app, get_task_repo, get_file_storage
-
-
-@pytest.fixture
-def client():
-    app, get_task_repo, get_file_storage = _make_app()
-    task_repo = FakeTaskRepository()
-    file_storage = FakeFileStorage()
-    app.dependency_overrides[get_task_repo] = lambda: task_repo
     app.dependency_overrides[get_file_storage] = lambda: file_storage
+
     with TestClient(app) as c:
-        yield c, task_repo, file_storage
+        yield c, file_storage
 
 
 class TestUploadRouter:
-    def test_upload_valid_csv_returns_202(self, client) -> None:
-        c, task_repo, _ = client
+    def test_upload_valid_csv_returns_202(self, client: tuple[TestClient, Any]) -> None:
+        c, _ = client
         response = c.post(
             "/api/v1/upload",
             files={
@@ -63,28 +45,26 @@ class TestUploadRouter:
         assert response.status_code == 202
         data = response.json()
         assert "task_id" in data
-        task = task_repo.get(UUID(data["task_id"]))
-        assert task is not None
-        assert task.status == TaskStatus.PENDING
+        UUID(data["task_id"])  # valida formato UUID
 
-    def test_upload_non_csv_returns_400(self, client) -> None:
-        c, _, _ = client
+    def test_upload_non_csv_returns_400(self, client: tuple[TestClient, Any]) -> None:
+        c, _ = client
         response = c.post(
             "/api/v1/upload",
             files={"file": ("test.txt", BytesIO(b"hello"))},
         )
         assert response.status_code == 400
 
-    def test_upload_empty_file_returns_400(self, client) -> None:
-        c, _, _ = client
+    def test_upload_empty_file_returns_400(self, client: tuple[TestClient, Any]) -> None:
+        c, _ = client
         response = c.post(
             "/api/v1/upload",
             files={"file": ("test.csv", BytesIO(b""))},
         )
         assert response.status_code == 400
 
-    def test_upload_too_large_returns_413(self, client) -> None:
-        c, _, _ = client
+    def test_upload_too_large_returns_413(self, client: tuple[TestClient, Any]) -> None:
+        c, _ = client
         response = c.post(
             "/api/v1/upload",
             files={"file": ("test.csv", BytesIO(b"x" * (104_857_600 + 1)))},
@@ -93,23 +73,33 @@ class TestUploadRouter:
 
 
 class TestTasksRouter:
-    def test_get_existing_task_returns_200(self, client) -> None:
-        c, task_repo, _ = client
-        task = ProcessingTask(
-            id=uuid4(),
-            status=TaskStatus.PROCESSING,
-            total_rows=100,
-            processed_rows=50,
+    def test_get_existing_task_returns_200(self, client: tuple[TestClient, Any]) -> None:
+        c, _ = client
+        from uuid import UUID
+        
+        # Primero crear una tarea vía upload
+        upload_response = c.post(
+            "/api/v1/upload",
+            files={
+                "file": (
+                    "test.csv",
+                    BytesIO(b"Email,Website,Subscription Date\nalice@example.com,https://example.com,2024-01-15\n"),
+                ),
+            },
         )
-        task_repo.save(task)
-        response = c.get(f"/api/v1/tasks/{task.id}")
+        assert upload_response.status_code == 202
+        task_id = upload_response.json()["task_id"]
+        
+        # Ahora consultar la tarea
+        response = c.get(f"/api/v1/tasks/{task_id}")
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "PROCESSING"
-        assert data["processed_rows"] == 50
-        assert data["total_rows"] == 100
+        assert data["status"] == "PENDING"
+        assert data["processed_rows"] == 0
+        assert data["total_rows"] == 1
 
-    def test_get_missing_task_returns_404(self, client) -> None:
-        c, _, _ = client
+    def test_get_missing_task_returns_404(self, client: tuple[TestClient, Any]) -> None:
+        c, _ = client
+        from uuid import uuid4
         response = c.get(f"/api/v1/tasks/{uuid4()}")
         assert response.status_code == 404

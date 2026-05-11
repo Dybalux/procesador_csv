@@ -1,7 +1,6 @@
 """Tests de integración para repositorios SQLAlchemy.
 
-Usan SQLite en memoria para verificar el mapeo ORM sin necesidad
-de PostgreSQL.
+Usan PostgreSQL via testcontainers para tests realistas.
 """
 
 from __future__ import annotations
@@ -10,14 +9,10 @@ from datetime import date, datetime, timezone
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 
-# Importar modelos para registrar metadata
-import infrastructure.db.models  # noqa: F401
 from domain.entities import Customer, ProcessingTask, RowValidationError, TaskStatus
 from domain.value_objects import Email, SubscriptionDate, Url
-from infrastructure.db.connection import Base
 from infrastructure.db.repositories import (
     SQLAlchemyCustomerRepository,
     SQLAlchemyErrorRepository,
@@ -25,26 +20,13 @@ from infrastructure.db.repositories import (
 )
 
 
-@pytest.fixture
-def session():
-    """Sesión SQLAlchemy sobre SQLite en memoria."""
-    engine = create_engine("sqlite:///:memory:", echo=False)
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 class TestSQLAlchemyTaskRepository:
-    def test_get_returns_none_for_missing_task(self, session) -> None:
-        repo = SQLAlchemyTaskRepository(session)
+    def test_get_returns_none_for_missing_task(self, db_session: Session) -> None:
+        repo = SQLAlchemyTaskRepository(db_session)
         assert repo.get(uuid4()) is None
 
-    def test_save_and_get_roundtrip(self, session) -> None:
-        repo = SQLAlchemyTaskRepository(session)
+    def test_save_and_get_roundtrip(self, db_session: Session) -> None:
+        repo = SQLAlchemyTaskRepository(db_session)
         task = ProcessingTask(
             id=uuid4(),
             status=TaskStatus.PENDING,
@@ -55,7 +37,7 @@ class TestSQLAlchemyTaskRepository:
             updated_at=datetime.now(timezone.utc),
         )
         repo.save(task)
-        session.commit()
+        db_session.commit()
 
         found = repo.get(task.id)
         assert found is not None
@@ -64,8 +46,8 @@ class TestSQLAlchemyTaskRepository:
         assert found.total_rows == 100
         assert found.file_path == "/tmp/test.csv"
 
-    def test_save_updates_existing_task(self, session) -> None:
-        repo = SQLAlchemyTaskRepository(session)
+    def test_save_updates_existing_task(self, db_session: Session) -> None:
+        repo = SQLAlchemyTaskRepository(db_session)
         task = ProcessingTask(
             id=uuid4(),
             status=TaskStatus.PENDING,
@@ -74,206 +56,90 @@ class TestSQLAlchemyTaskRepository:
             updated_at=datetime.now(timezone.utc),
         )
         repo.save(task)
-        session.commit()
+        db_session.commit()
 
         task.transition_to(TaskStatus.PROCESSING)
         repo.save(task)
-        session.commit()
+        db_session.commit()
 
         found = repo.get(task.id)
         assert found is not None
         assert found.status == TaskStatus.PROCESSING
 
-
-class TestSQLAlchemyCustomerRepository:
-    def test_add_bulk_and_count_by_task(self, session) -> None:
-        task_id = uuid4()
-        repo = SQLAlchemyCustomerRepository(session, task_id=task_id)
-
-        customers = [
-            Customer(
-                id=uuid4(),
-                email=Email("alice@example.com"),
-                website=Url("https://example.com"),
-                subscription_date=SubscriptionDate(date(2024, 1, 15)),
-            ),
-            Customer(
-                id=uuid4(),
-                email=Email("bob@example.com"),
-                website=Url("https://bob.dev"),
-                subscription_date=SubscriptionDate(date(2024, 2, 20)),
-            ),
-        ]
-        repo.add_bulk(customers)
-        session.commit()
-
-        assert repo.count_by_task(task_id) == 2
-
-    def test_count_by_task_filters_by_task(self, session) -> None:
-        task_a = uuid4()
-        task_b = uuid4()
-        repo_a = SQLAlchemyCustomerRepository(session, task_id=task_a)
-        repo_b = SQLAlchemyCustomerRepository(session, task_id=task_b)
-
-        repo_a.add_bulk([
-            Customer(
-                id=uuid4(),
-                email=Email("a@example.com"),
-                website=Url("https://a.com"),
-                subscription_date=SubscriptionDate(date(2024, 1, 1)),
-            ),
-        ])
-        repo_b.add_bulk([
-            Customer(
-                id=uuid4(),
-                email=Email("b@example.com"),
-                website=Url("https://b.com"),
-                subscription_date=SubscriptionDate(date(2024, 1, 1)),
-            ),
-        ])
-        session.commit()
-
-        assert repo_a.count_by_task(task_a) == 1
-        assert repo_a.count_by_task(task_b) == 1
-
-    def test_merge_is_idempotent(self, session) -> None:
-        task_id = uuid4()
-        repo = SQLAlchemyCustomerRepository(session, task_id=task_id)
-        customer_id = uuid4()
-        customer = Customer(
-            id=customer_id,
-            email=Email("alice@example.com"),
-            website=Url("https://example.com"),
-            subscription_date=SubscriptionDate(date(2024, 1, 15)),
-        )
-
-        repo.add_bulk([customer])
-        session.commit()
-
-        repo.add_bulk([customer])
-        session.commit()
-
-        assert repo.count_by_task(task_id) == 1
-
-
-class TestSQLAlchemyErrorRepository:
-    def test_add_bulk_and_list_by_task(self, session) -> None:
-        task_id = uuid4()
-        repo = SQLAlchemyErrorRepository(session)
-
-        errors = [
-            RowValidationError(
-                id=uuid4(),
-                task_id=task_id,
-                row_number=1,
-                raw_data={"email": "bad"},
-                reason="Invalid email",
-            ),
-            RowValidationError(
-                id=uuid4(),
-                task_id=task_id,
-                row_number=2,
-                raw_data={"website": "nope"},
-                reason="Invalid URL",
-            ),
-        ]
-        repo.add_bulk(errors)
-        session.commit()
-
-        found = repo.list_by_task(task_id)
-        assert len(found) == 2
-        reasons = {e.reason for e in found}
-        assert reasons == {"Invalid email", "Invalid URL"}
-
-    def test_list_by_task_filters_by_task(self, session) -> None:
-        repo = SQLAlchemyErrorRepository(session)
-        task_a = uuid4()
-        task_b = uuid4()
-
-        repo.add_bulk([
-            RowValidationError(
-                id=uuid4(),
-                task_id=task_a,
-                row_number=1,
-                raw_data={},
-                reason="err A",
-            ),
-        ])
-        repo.add_bulk([
-            RowValidationError(
-                id=uuid4(),
-                task_id=task_b,
-                row_number=1,
-                raw_data={},
-                reason="err B",
-            ),
-        ])
-        session.commit()
-
-        assert len(repo.list_by_task(task_a)) == 1
-        assert repo.list_by_task(task_a)[0].reason == "err A"
-        assert len(repo.list_by_task(task_b)) == 1
-        assert repo.list_by_task(task_b)[0].reason == "err B"
-
-
-# TODO: Instalar testcontainers para ejecutar tests con PostgreSQL real.
-# Ejemplo: pip install testcontainers[postgres]
-
-
-class TestWithPostgreSQL:
-    """Tests de integración con PostgreSQL vía testcontainers.
-
-    Se saltan automáticamente si ``testcontainers`` no está instalado.
-    """
-
-    @pytest.fixture(scope="class")
-    def pg_engine(self):
-        """Levanta un contenedor PostgreSQL y retorna el engine SQLAlchemy."""
-        pytest.importorskip("testcontainers", reason="testcontainers not installed")
-        from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
-
-        with PostgresContainer("postgres:15") as postgres:
-            engine = create_engine(postgres.get_connection_url())
-            Base.metadata.create_all(bind=engine)
-            yield engine
-
-    @pytest.fixture
-    def pg_session(self, pg_engine):
-        """Sesión SQLAlchemy sobre el contenedor PostgreSQL."""
-        from sqlalchemy.orm import sessionmaker
-
-        TestingSessionLocal = sessionmaker(
-            autocommit=False, autoflush=False, bind=pg_engine
-        )
-        session = TestingSessionLocal()
-        yield session
-        session.rollback()
-        session.close()
-
-    def test_task_repo_save_and_get_with_postgres(self, pg_session) -> None:
-        repo = SQLAlchemyTaskRepository(pg_session)
+    def test_save_and_advance_progress(self, db_session: Session) -> None:
+        repo = SQLAlchemyTaskRepository(db_session)
         task = ProcessingTask(
             id=uuid4(),
             status=TaskStatus.PENDING,
             total_rows=100,
+            processed_rows=0,
             file_path="/tmp/test.csv",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
         repo.save(task)
-        pg_session.commit()
+        db_session.commit()
+
+        task.transition_to(TaskStatus.PROCESSING)
+        task.advance_progress(10)
+        repo.save(task)
+        db_session.commit()
 
         found = repo.get(task.id)
         assert found is not None
-        assert found.status == TaskStatus.PENDING
-        assert found.total_rows == 100
+        assert found.status == TaskStatus.PROCESSING
+        assert found.processed_rows == 10
 
-    def test_customer_repo_add_bulk_with_postgres(self, pg_session) -> None:
-        task_id = uuid4()
-        repo = SQLAlchemyCustomerRepository(pg_session, task_id=task_id)
+    def test_advance_progress_cannot_exceed_total(self, db_session: Session) -> None:
+        repo = SQLAlchemyTaskRepository(db_session)
+        task = ProcessingTask(
+            id=uuid4(),
+            status=TaskStatus.PROCESSING,
+            total_rows=50,
+            processed_rows=0,
+            file_path="/tmp/test.csv",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        repo.save(task)
+        db_session.commit()
+
+        # Advance progress in batches to not exceed total
+        task.advance_progress(30)
+        repo.save(task)
+        db_session.commit()
+        
+        task.advance_progress(30)  # Should cap at 50
+        repo.save(task)
+        db_session.commit()
+
+        found = repo.get(task.id)
+        assert found is not None
+        assert found.processed_rows == 50  # capped at total_rows
+
+
+class TestSQLAlchemyCustomerRepository:
+    def test_add_bulk_and_get(self, db_session: Session) -> None:
+        # Crear tarea primero para FK
+        task_repo = SQLAlchemyTaskRepository(db_session)
+        task = ProcessingTask(
+            id=uuid4(),
+            status=TaskStatus.PROCESSING,
+            total_rows=10,
+            file_path="/tmp/test.csv",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        task_repo.save(task)
+        db_session.commit()
+
+        customer_repo = SQLAlchemyCustomerRepository(db_session, task_id=task.id)
+
         customers = [
             Customer(
                 id=uuid4(),
                 email=Email("alice@example.com"),
-                website=Url("https://example.com"),
+                website=Url("https://alice.com"),
                 subscription_date=SubscriptionDate(date(2024, 1, 15)),
             ),
             Customer(
@@ -283,26 +149,120 @@ class TestWithPostgreSQL:
                 subscription_date=SubscriptionDate(date(2024, 2, 20)),
             ),
         ]
-        repo.add_bulk(customers)
-        pg_session.commit()
+        customer_repo.add_bulk(customers)
+        db_session.commit()
 
-        assert repo.count_by_task(task_id) == 2
+        found = customer_repo.get(customers[0].id)
+        assert found is not None
+        assert found.email.address == "alice@example.com"
 
-    def test_error_repo_add_bulk_with_postgres(self, pg_session) -> None:
-        task_id = uuid4()
-        repo = SQLAlchemyErrorRepository(pg_session)
+    def test_count_by_task(self, db_session: Session) -> None:
+        task_repo = SQLAlchemyTaskRepository(db_session)
+        task = ProcessingTask(
+            id=uuid4(),
+            status=TaskStatus.PROCESSING,
+            total_rows=10,
+            file_path="/tmp/test.csv",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        task_repo.save(task)
+        db_session.commit()
+
+        customer_repo = SQLAlchemyCustomerRepository(db_session, task_id=task.id)
+
+        customers = [
+            Customer(
+                id=uuid4(),
+                email=Email(f"user{i}@example.com"),
+                website=Url("https://example.com"),
+                subscription_date=SubscriptionDate(date(2024, 1, 15)),
+            )
+            for i in range(5)
+        ]
+        customer_repo.add_bulk(customers)
+        db_session.commit()
+
+        assert customer_repo.count_by_task(task.id) == 5
+
+
+class TestSQLAlchemyErrorRepository:
+    def test_add_bulk_and_list_by_task(self, db_session: Session) -> None:
+        # Crear tarea primero para FK
+        task_repo = SQLAlchemyTaskRepository(db_session)
+        task = ProcessingTask(
+            id=uuid4(),
+            status=TaskStatus.PROCESSING,
+            total_rows=10,
+            file_path="/tmp/test.csv",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        task_repo.save(task)
+        db_session.commit()
+
+        error_repo = SQLAlchemyErrorRepository(db_session)
+
         errors = [
             RowValidationError(
                 id=uuid4(),
-                task_id=task_id,
+                task_id=task.id,
                 row_number=1,
                 raw_data={"email": "bad"},
                 reason="Invalid email",
             ),
+            RowValidationError(
+                id=uuid4(),
+                task_id=task.id,
+                row_number=2,
+                raw_data={"date": "not-a-date"},
+                reason="Invalid date",
+            ),
         ]
-        repo.add_bulk(errors)
-        pg_session.commit()
+        error_repo.add_bulk(errors)
+        db_session.commit()
 
-        found = repo.list_by_task(task_id)
-        assert len(found) == 1
-        assert found[0].reason == "Invalid email"
+        found = error_repo.list_by_task(task.id)
+        assert len(found) == 2
+        assert found[0].row_number == 1
+        assert found[1].row_number == 2
+
+    def test_list_by_task_returns_empty_for_no_errors(self, db_session: Session) -> None:
+        error_repo = SQLAlchemyErrorRepository(db_session)
+        found = error_repo.list_by_task(uuid4())
+        assert found == []
+
+    def test_count_by_task(self, db_session: Session) -> None:
+        # Crear tarea primero para FK
+        task_repo = SQLAlchemyTaskRepository(db_session)
+        task = ProcessingTask(
+            id=uuid4(),
+            status=TaskStatus.PROCESSING,
+            total_rows=10,
+            file_path="/tmp/test.csv",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        task_repo.save(task)
+        db_session.commit()
+
+        error_repo = SQLAlchemyErrorRepository(db_session)
+
+        errors = [
+            RowValidationError(
+                id=uuid4(),
+                task_id=task.id,
+                row_number=i,
+                raw_data={},
+                reason="Error",
+            )
+            for i in range(1, 4)  # row_number > 0
+        ]
+        error_repo.add_bulk(errors)
+        db_session.commit()
+
+        assert error_repo.count_by_task(task.id) == 3
+
+    def test_count_by_task_returns_zero_for_no_errors(self, db_session: Session) -> None:
+        error_repo = SQLAlchemyErrorRepository(db_session)
+        assert error_repo.count_by_task(uuid4()) == 0

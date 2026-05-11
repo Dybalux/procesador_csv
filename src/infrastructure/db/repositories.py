@@ -75,6 +75,18 @@ class SQLAlchemyCustomerRepository:
             )
             self._session.merge(orm)
 
+    def get(self, customer_id: UUID) -> Customer | None:
+        """Busca un cliente por ID."""
+        orm = self._session.get(CustomerORM, customer_id)
+        if orm is None:
+            return None
+        return Customer(
+            id=orm.id,
+            email=Email(orm.email),
+            website=Url(orm.website),
+            subscription_date=SubscriptionDate(orm.subscription_date),
+        )
+
     def count_by_task(self, task_id: UUID) -> int:
         """Cuenta clientes asociados a una tarea."""
         stmt = (
@@ -119,3 +131,12 @@ class SQLAlchemyErrorRepository:
             )
             for orm in orms
         ]
+
+    def count_by_task(self, task_id: UUID) -> int:
+        """Cuenta errores asociados a una tarea."""
+        stmt = (
+            select(func.count())
+            .select_from(RowValidationErrorORM)
+            .where(RowValidationErrorORM.task_id == task_id)
+        )
+        return self._session.scalar(stmt) or 0
