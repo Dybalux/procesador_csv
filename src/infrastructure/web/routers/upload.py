@@ -10,12 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from application.interfaces import UploadResponse
 from application.use_cases.upload_csv import UploadCSV
 from domain.ports import FileStorage, TaskRepository
-from infrastructure.celery.tasks import CHUNK_SIZE, process_csv_chunk
+from infrastructure.celery.tasks import process_csv_chunk
+from infrastructure.config.settings import settings
 from infrastructure.web.dependencies import get_file_storage, get_task_repo
 
 router = APIRouter()
-
-MAX_FILE_SIZE = 104_857_600  # 100 MB
 
 
 @router.post(
@@ -42,7 +41,7 @@ def upload_csv(
             detail="File is empty",
         )
 
-    if len(content) > MAX_FILE_SIZE:
+    if len(content) > settings.MAX_FILE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="File too large",
@@ -54,9 +53,8 @@ def upload_csv(
     # Calcular número de chunks y encolar automáticamente
     file_like = io.StringIO(content.decode("utf-8"))
     row_count = sum(1 for _ in csv.DictReader(file_like))
-    total_chunks = (row_count + CHUNK_SIZE - 1) // CHUNK_SIZE
 
-    for chunk_offset in range(0, row_count, CHUNK_SIZE):
+    for chunk_offset in range(0, row_count, settings.CHUNK_SIZE):
         process_csv_chunk.delay(str(task_id), chunk_offset)
 
     return UploadResponse(task_id=task_id)

@@ -18,10 +18,9 @@ from infrastructure.db.repositories import (
     SQLAlchemyTaskRepository,
 )
 from infrastructure.db.uow import SQLAlchemyUnitOfWork
+from infrastructure.config.settings import settings
 from infrastructure.storage.csv_mappers import CUSTOMERS_100_MAP
 from infrastructure.storage.local_file_storage import LocalFileStorage
-
-CHUNK_SIZE = 1000  # TODO: mover a settings / env var
 
 
 @celery_app.task(
@@ -50,7 +49,7 @@ def process_csv_chunk(self, task_id: str, chunk_offset: int) -> dict[str, int]:
 
     storage = LocalFileStorage()
     rows = storage.read_chunk(
-        task.file_path, CHUNK_SIZE, chunk_offset, header_mapping=CUSTOMERS_100_MAP
+        task.file_path, settings.CHUNK_SIZE, chunk_offset, header_mapping=CUSTOMERS_100_MAP
     )
 
     if not rows:

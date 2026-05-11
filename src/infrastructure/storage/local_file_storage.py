@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import csv
 import os
-import tempfile
 from collections.abc import Iterable
 from typing import IO
 
 from domain.ports import FileStorage
+from infrastructure.config.settings import settings
 
 
 def _apply_header_mapping(
@@ -31,9 +31,7 @@ class LocalFileStorage(FileStorage):
     """Guarda archivos en disco y los lee por chunks de filas."""
 
     def __init__(self, base_dir: str | None = None) -> None:
-        self._base_dir = base_dir or os.path.join(
-            tempfile.gettempdir(), "procesador_csv", "uploads"
-        )
+        self._base_dir = base_dir or settings.UPLOAD_BASE_DIR
         os.makedirs(self._base_dir, exist_ok=True)
 
     def save(self, filename: str, content: bytes) -> str:

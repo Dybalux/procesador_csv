@@ -27,11 +27,11 @@ COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV PYTHONPATH=/app/src
-ENV DATABASE_URL=postgresql+psycopg2://user:pass@db/procesador_csv
-ENV CELERY_BROKER_URL=redis://redis:6379/0
-ENV CELERY_RESULT_BACKEND=redis://redis:6379/0
 
 EXPOSE 8000
 
+COPY start-app.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-app.sh
+
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["uvicorn", "infrastructure.web.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["start-app.sh"]

@@ -28,6 +28,14 @@ services:
       DATABASE_URL: postgresql+psycopg2://user:pass@db/procesador_csv
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      UVICORN_WORKERS: 2
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: 8000
+      CHUNK_SIZE: 1000
+      MAX_FILE_SIZE: 104857600
+      DB_POOL_SIZE: 5
+      DB_MAX_OVERFLOW: 10
+      UPLOAD_BASE_DIR: /tmp/procesador_csv/uploads
     volumes:
       - uploads_data:/tmp/procesador_csv/uploads
     depends_on:
@@ -38,11 +46,14 @@ services:
 
   worker:
     build: .
-    command: celery -A infrastructure.celery.config:celery_app worker -l info -Q csv_processing
+    command: celery -A infrastructure.celery.config:celery_app worker -l info -Q csv_processing --concurrency ${CELERY_CONCURRENCY:-4}
     environment:
       DATABASE_URL: postgresql+psycopg2://user:pass@db/procesador_csv
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CELERY_CONCURRENCY: 4
+      CHUNK_SIZE: 1000
+      UPLOAD_BASE_DIR: /tmp/procesador_csv/uploads
     volumes:
       - uploads_data:/tmp/procesador_csv/uploads
     depends_on:

@@ -6,20 +6,21 @@ los modelos ORM.
 
 from __future__ import annotations
 
-import os
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://user:pass@localhost/procesador_csv",
-)
+from infrastructure.config.settings import settings
 
 
 class Base(DeclarativeBase):
     """Base declarativa para todos los modelos ORM."""
 
 
-engine = create_engine(DATABASE_URL, echo=False)
+engine = create_engine(
+    settings.DATABASE_URL,
+    echo=settings.DB_ECHO,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
