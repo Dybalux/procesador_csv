@@ -1,129 +1,129 @@
-# Procesador CSV Asíncrono
+# Asynchronous CSV Processor
 
-Procesador de archivos CSV con arquitectura limpia/hexagonal. Soporta archivos grandes, procesamiento por chunks en background con Celery, y persistencia en PostgreSQL.
+A CSV file processor built with a clean/hexagonal architecture. It supports large files, background chunk processing with Celery, and persistence in PostgreSQL.
 
-## 🏗️ Arquitectura
+## 🏗️ Architecture
 
-**Arquitectura Hexagonal (Ports & Adapters)** con las siguientes capas:
+**Hexagonal Architecture (Ports & Adapters)** with the following layers:
 
-```
+```text
 src/
-├── domain/              # Capa de dominio (puramente Python)
-│   ├── entities.py      # Entidades de negocio
+├── domain/              # Domain layer (pure Python)
+│   ├── entities.py      # Business entities
 │   ├── value_objects.py # Email, Url, SubscriptionDate
-│   ├── exceptions.py    # Excepciones de dominio
+│   ├── exceptions.py    # Domain exceptions
 │   ├── ports.py         # Protocols (interfaces)
-│   └── validation_rules.py # Reglas de validación
+│   └── validation_rules.py # Validation rules
 │
-├── application/         # Casos de uso
+├── application/         # Use cases
 │   ├── use_cases/       # UploadCSV, GetTaskStatus, ProcessChunk
 │   └── interfaces.py    # DTOs (Pydantic)
 │
-└── infrastructure/      # Adaptadores
+└── infrastructure/      # Adapters
     ├── db/              # SQLAlchemy + PostgreSQL
-    ├── storage/         # FileSystem local
+    ├── storage/         # Local FileSystem
     ├── celery/          # Workers + Redis
     └── web/             # FastAPI + routers
 ```
 
-**Principio clave:** El dominio NO importa frameworks (FastAPI, Celery, SQLAlchemy, Pydantic).
+**Key Principle:** The domain MUST NOT import frameworks (FastAPI, Celery, SQLAlchemy, Pydantic).
 
-## 📖 Casos de Uso
+## 📖 Use Cases
 
-La capa de aplicación expone tres casos de uso principales que orquestan el flujo completo de procesamiento de CSV.
+The application layer exposes three main use cases that orchestrate the entire CSV processing flow.
 
-### `UploadCSV` — Subir un archivo CSV
+### `UploadCSV` — Upload a CSV file
 
-**Responsabilidad:** Recibe el contenido de un archivo CSV, lo persiste en disco, crea una tarea de procesamiento en estado `PENDING`, y encola automáticamente todos los chunks en Celery para procesamiento en background.
+**Responsibility:** Receives the content of a CSV file, persists it to disk, creates a processing task in `PENDING` state, and automatically enqueues all chunks in Celery for background processing.
 
-**Entrada:**
-- `file_content` (bytes): contenido del archivo
-- `filename` (str): nombre original del archivo
+**Input:**
+- `file_content` (bytes): file content
+- `filename` (str): original filename
 
-**Salida:**
-- `task_id` (UUID): identificador único de la tarea creada
+**Output:**
+- `task_id` (UUID): unique identifier of the created task
 
-**Flujo interno:**
-```
-Valida extensión .csv y tamaño máximo
-    → Guarda archivo en disco vía FileStorage
-    → Crea ProcessingTask(status=PENDING)
-    → Persiste tarea vía TaskRepository
-    → Cuenta filas del CSV
-    → Encola N tareas Celery (una por chunk)
-    → Retorna task_id
+**Internal flow:**
+```text
+Validates .csv extension and max size
+    → Saves file to disk via FileStorage
+    → Creates ProcessingTask(status=PENDING)
+    → Persists task via TaskRepository
+    → Counts CSV rows
+    → Enqueues N Celery tasks (one per chunk)
+    → Returns task_id
 ```
 
 **Endpoint:** `POST /api/v1/upload`
 
 ---
 
-### `GetTaskStatus` — Consultar estado de una tarea
+### `GetTaskStatus` — Check task status
 
-**Responsabilidad:** Busca una tarea de procesamiento por su ID y retorna un DTO con el estado actual, filas procesadas, total de filas y fecha de creación.
+**Responsibility:** Fetches a processing task by its ID and returns a DTO with its current status, processed rows, total rows, and creation date.
 
-**Entrada:**
-- `task_id` (UUID): identificador de la tarea
+**Input:**
+- `task_id` (UUID): task identifier
 
-**Salida:**
+**Output:**
 - `TaskStatusDTO`: `{ status, processed_rows, total_rows, created_at }`
 
-**Excepciones:**
-- `TaskNotFound`: si la tarea no existe en la base de datos
+**Exceptions:**
+- `TaskNotFound`: if the task does not exist in the database
 
-**Flujo interno:**
-```
-Recibe task_id
-    → Busca tarea vía TaskRepository.get()
-    → Si no existe → lanza TaskNotFound
-    → Mapea a TaskStatusDTO
-    → Retorna DTO
+**Internal flow:**
+```text
+Receives task_id
+    → Fetches task via TaskRepository.get()
+    → If not exists → raises TaskNotFound
+    → Maps to TaskStatusDTO
+    → Returns DTO
 ```
 
 **Endpoint:** `GET /api/v1/tasks/{task_id}`
 
 ---
 
-### `ProcessChunk` — Procesar un lote de filas CSV
+### `ProcessChunk` — Process a batch of CSV rows
 
-**Responsabilidad:** Procesa un chunk de filas CSV aplicando reglas de validación en orden, separa filas válidas de inválidas, persiste ambas en bulk dentro de una unidad de trabajo atómica, y actualiza el contador de filas procesadas de la tarea.
+**Responsibility:** Processes a chunk of CSV rows by applying validation rules in order, separating valid from invalid rows, bulk persisting both within an atomic unit of work, and updating the task's processed rows counter.
 
-**Entrada:**
-- `task_id` (UUID): identificador de la tarea padre
-- `rows` (list[dict]): lista de filas del chunk
-- `chunk_offset` (int): número de fila inicial (para calcular row_number)
+**Input:**
+- `task_id` (UUID): parent task identifier
+- `rows` (list[dict]): list of rows in the chunk
+- `chunk_offset` (int): starting row number (to calculate actual row_number)
 
-**Salida:**
+**Output:**
 - `ChunkResult`: `{ valid_count, error_count }`
 
-**Flujo interno:**
-```
-Recibe task_id + rows + chunk_offset
-    → Busca tarea → si no existe → lanza TaskNotFound
-    → Si estado es PENDING → transition_to(PROCESSING)
-    → Por cada fila:
-        - Aplica reglas de validación (EmailRule, UrlRule, DateRule)
-        - Si válida → construye Customer → lista valid
-        - Si inválida → construye RowValidationError → lista errors
-    → Abre UnitOfWork
+**Internal flow:**
+```text
+Receives task_id + rows + chunk_offset
+    → Fetches task → if not exists → raises TaskNotFound
+    → If status is PENDING → transition_to(PROCESSING)
+    → For each row:
+        - Applies validation rules (EmailRule, UrlRule, DateRule)
+        - If valid → builds Customer → valid list
+        - If invalid → builds RowValidationError → errors list
+    → Opens UnitOfWork
         - CustomerRepository.add_bulk(valid)
         - ErrorRepository.add_bulk(errors)
-        - TaskRepository.save(task) con advance_progress()
-        - Si processed_rows >= total_rows → transition_to(COMPLETED)
+        - TaskRepository.save(task) with advance_progress()
+        - If processed_rows >= total_rows → transition_to(COMPLETED)
         - commit()
-    → Retorna ChunkResult
+    → Returns ChunkResult
 ```
 
-**Ejecutado por:** Worker de Celery (background, asíncrono)
+**Executed by:** Celery Worker (background, asynchronous)
 
 ---
 
-### 🔄 Flujo completo end-to-end
+### 🔄 End-to-End Flow
 
-```
+```text
 ┌─────────────┐     POST /api/v1/upload      ┌─────────────┐
-│   Usuario   │ ───────────────────────────→ │   FastAPI   │
-│  (Cliente)  │                              │   (app)     │
+│    User     │ ───────────────────────────→ │   FastAPI   │
+│  (Client)   │                              │   (app)     │
 └─────────────┘                              └──────┬──────┘
        ↑                                            │
        │           {"task_id": "xxx"}               │
@@ -133,11 +133,11 @@ Recibe task_id + rows + chunk_offset
                            ▼
                     ┌──────────────┐
                     │  UploadCSV   │
-                    │  - Guarda    │
-                    │    archivo   │
-                    │  - Crea      │
-                    │    tarea     │
-                    │  - Encola    │
+                    │  - Saves     │
+                    │    file      │
+                    │  - Creates   │
+                    │    task      │
+                    │  - Enqueues  │
                     │    chunks    │
                     └──────┬───────┘
                            │
@@ -156,10 +156,10 @@ Recibe task_id + rows + chunk_offset
                            ▼
                     ┌──────────────┐
                     │ ProcessChunk │
-                    │  - Valida    │
-                    │  - Persiste  │
-                    │  - Actualiza │
-                    │    contador  │
+                    │  - Validates │
+                    │  - Persists  │
+                    │  - Updates   │
+                    │    counter   │
                     └──────┬───────┘
                            │
                            ▼
@@ -175,133 +175,133 @@ Recibe task_id + rows + chunk_offset
         "processed_rows": 1000}
 ```
 
-**Estados de una tarea:**
-- `PENDING` → tarea creada, esperando procesamiento
-- `PROCESSING` → al menos un chunk está siendo procesado
-- `COMPLETED` → todos los chunks procesados (si total_rows es conocido)
-- `FAILED` → ocurrió un error irrecuperable
+**Task statuses:**
+- `PENDING` → task created, waiting to be processed
+- `PROCESSING` → at least one chunk is being processed
+- `COMPLETED` → all chunks processed (if total_rows is known)
+- `FAILED` → an unrecoverable error occurred
 
 ---
 
-## 🚀 Stack Tecnológico
+## 🚀 Tech Stack
 
 - **Python 3.11** + Alpine Linux
-- **FastAPI** - API REST
-- **Celery 5.6** + **Redis** - Cola de tareas
-- **PostgreSQL 15** - Base de datos
-- **SQLAlchemy 2.0** - ORM con `Mapped[]`/`mapped_column()`
-- **Pydantic v2** - Validación y DTOs
-- **Alembic** - Migraciones de DB
-- **Docker + Docker Compose** - Infraestructura
+- **FastAPI** - REST API
+- **Celery 5.6** + **Redis** - Task queue
+- **PostgreSQL 15** - Database
+- **SQLAlchemy 2.0** - ORM with `Mapped[]`/`mapped_column()`
+- **Pydantic v2** - Validation and DTOs
+- **Alembic** - DB Migrations
+- **Docker + Docker Compose** - Infrastructure
 
-## 📋 Requisitos Previos
+## 📋 Prerequisites
 
 - Docker Engine 24+
 - Docker Compose v2+
-- curl (para probar la API)
+- curl (to test the API)
 
-## 🔧 Instalación y Setup
+## 🔧 Installation & Setup
 
-### 1. Clonar y entrar al proyecto
+### 1. Clone and enter the project
 
 ```bash
 git clone <repo-url>
 cd procesador_csv
 ```
 
-### 2. Iniciar servicios
+### 2. Start services
 
 ```bash
-# Bajar todo si había algo corriendo
+# Bring down everything if previously running
 docker compose down -v
 
-# Reconstruir imágenes (primera vez o después de cambios)
+# Rebuild images (first time or after changes)
 docker compose build --no-cache
 
-# Levantar servicios
+# Bring up services
 docker compose up -d
 ```
 
-### 3. Verificar estado
+### 3. Check status
 
 ```bash
 docker compose ps
 ```
 
-Esperar a ver:
+Wait to see:
 - `db` → `(healthy)`
 - `app` → `Up`
 - `worker` → `Up`
 - `redis` → `Up`
 
-### 4. Aplicar migraciones (primera vez)
+### 4. Apply migrations (first time)
 
 ```bash
-# Si las tablas no existen, aplicar migración de Alembic
+# If tables don't exist, apply Alembic migration
 docker compose exec app alembic upgrade head
 ```
 
-## ⚙️ Configuración
+## ⚙️ Configuration
 
-Toda la configuración se realiza mediante **variables de entorno** (principio 12-factor app). Puedes modificar los valores editando el archivo `docker-compose.yml` o creando un archivo `.env` en la raíz del proyecto.
+All configuration is done via **environment variables** (12-factor app principle). You can modify values by editing the `docker-compose.yml` file or creating a `.env` file in the project root.
 
-### Variables disponibles
+### Available variables
 
-#### Base de datos (`src/infrastructure/db/connection.py`)
+#### Database (`src/infrastructure/db/connection.py`)
 
-| Variable | Default | Descripción |
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `postgresql+psycopg2://user:pass@db/procesador_csv` | URL de conexión a PostgreSQL |
-| `DB_POOL_SIZE` | `5` | Conexiones mantenidas permanentemente en el pool |
-| `DB_MAX_OVERFLOW` | `10` | Conexiones extras que se pueden crear bajo demanda |
-| `DB_POOL_TIMEOUT` | `30` | Segundos de espera antes de lanzar error si el pool está lleno |
-| `DB_ECHO` | `false` | Si es `true`, SQLAlchemy imprime todas las queries en stdout |
+| `DATABASE_URL` | `postgresql+psycopg2://user:pass@db/procesador_csv` | PostgreSQL connection URL |
+| `DB_POOL_SIZE` | `5` | Permanent connections kept in the pool |
+| `DB_MAX_OVERFLOW` | `10` | Extra connections created on demand |
+| `DB_POOL_TIMEOUT` | `30` | Seconds to wait before raising an error if the pool is full |
+| `DB_ECHO` | `false` | If `true`, SQLAlchemy prints all queries to stdout |
 
 #### Celery (`src/infrastructure/celery/config.py`, `docker-compose.yml`)
 
-| Variable | Default | Descripción |
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `CELERY_BROKER_URL` | `redis://redis:6379/0` | URL del broker Redis |
-| `CELERY_RESULT_BACKEND` | `redis://redis:6379/0` | URL del backend de resultados |
-| `CELERY_CONCURRENCY` | `4` | Número de workers de Celery ejecutándose en paralelo |
-| `CELERY_WORKER_PREFETCH_MULTIPLIER` | `1` | Cuántas tareas reserva cada worker por adelantado |
+| `CELERY_BROKER_URL` | `redis://redis:6379/0` | Redis broker URL |
+| `CELERY_RESULT_BACKEND` | `redis://redis:6379/0` | Results backend URL |
+| `CELERY_CONCURRENCY` | `4` | Number of Celery workers running in parallel |
+| `CELERY_WORKER_PREFETCH_MULTIPLIER` | `1` | How many tasks each worker reserves in advance |
 
-#### Procesamiento de CSV (`src/infrastructure/celery/tasks.py`, `src/api/v1/endpoints/upload.py`)
+#### CSV Processing (`src/infrastructure/celery/tasks.py`, `src/api/v1/endpoints/upload.py`)
 
-| Variable | Default | Descripción |
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `CHUNK_SIZE` | `1000` | Cantidad de filas que cada tarea Celery procesa en un batch |
-| `MAX_FILE_SIZE` | `104857600` | Tamaño máximo de archivo en bytes (default: 100 MB) |
+| `CHUNK_SIZE` | `1000` | Amount of rows each Celery task processes in a batch |
+| `MAX_FILE_SIZE` | `104857600` | Maximum file size in bytes (default: 100 MB) |
 
-> **Tip:** Si subís un CSV de 10.000 filas con `CHUNK_SIZE=1000`, se crearán 10 tareas Celery. Con `CHUNK_SIZE=100`, se crearán 100 tareas (más granularidad, más overhead).
+> **Tip:** If you upload a 10,000-row CSV with `CHUNK_SIZE=1000`, 10 Celery tasks will be created. With `CHUNK_SIZE=100`, 100 tasks will be created (more granularity, more overhead).
 
 #### API — Uvicorn (`start-app.sh`)
 
-| Variable | Default | Descripción |
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `UVICORN_HOST` | `0.0.0.0` | Interface de red donde escucha la API |
-| `UVICORN_PORT` | `8000` | Puerto de la API |
-| `UVICORN_WORKERS` | `2` | Número de procesos workers de Uvicorn |
-| `UVICORN_RELOAD` | `false` | Solo desarrollo: recarga automática al detectar cambios |
+| `UVICORN_HOST` | `0.0.0.0` | Network interface where the API listens |
+| `UVICORN_PORT` | `8000` | API Port |
+| `UVICORN_WORKERS` | `2` | Number of Uvicorn worker processes |
+| `UVICORN_RELOAD` | `false` | Development only: automatic reload on changes |
 
-> **Tip:** Para máquinas con muchas CPUs, subí `UVICORN_WORKERS` a `4` y `CELERY_CONCURRENCY` a `8` para aprovechar el hardware.
+> **Tip:** For machines with multiple CPUs, increase `UVICORN_WORKERS` to `4` and `CELERY_CONCURRENCY` to `8` to leverage hardware.
 
 #### Storage (`src/infrastructure/storage/local_file_storage.py`)
 
-| Variable | Default | Descripción |
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `UPLOAD_BASE_DIR` | `/tmp/procesador_csv/uploads` | Directorio donde se guardan temporalmente los CSV subidos |
+| `UPLOAD_BASE_DIR` | `/tmp/procesador_csv/uploads` | Directory where uploaded CSVs are temporarily stored |
 
-### Ejemplo: override rápido desde la línea de comandos
+### Example: Quick command-line override
 
 ```bash
-# Levantar con más workers de Celery y chunks más pequeños
+# Bring up with more Celery workers and smaller chunks
 CELERY_CONCURRENCY=8 CHUNK_SIZE=500 docker compose up -d
 ```
 
-### Ejemplo: usando un archivo `.env`
+### Example: Using a `.env` file
 
-Crea un archivo `.env` en la raíz del proyecto:
+Create an `.env` file in the project root:
 
 ```bash
 # .env
@@ -312,35 +312,35 @@ UVICORN_WORKERS=4
 DB_POOL_SIZE=10
 ```
 
-Luego levantá los servicios normalmente:
+Then start the services normally:
 
 ```bash
 docker compose up -d
 ```
 
-## 🎯 Uso
+## 🎯 Usage
 
-### Subir un archivo CSV
+### Upload a CSV file
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/upload \
   -F "file=@customers-100.csv"
 ```
 
-**Respuesta:**
+**Response:**
 ```json
 {"task_id": "xxxxx-xxxxx-xxxxx-xxxxx"}
 ```
 
-El procesamiento es **automático**: la API encola los chunks en Celery sin intervención manual.
+Processing is **automatic**: the API enqueues the chunks in Celery without manual intervention.
 
-### Consultar estado de tarea
+### Check task status
 
 ```bash
-curl http://localhost:8000/api/v1/tasks/TU_TASK_ID
+curl http://localhost:8000/api/v1/tasks/YOUR_TASK_ID
 ```
 
-**Respuesta:**
+**Response:**
 ```json
 {
   "status": "PROCESSING",
@@ -350,13 +350,13 @@ curl http://localhost:8000/api/v1/tasks/TU_TASK_ID
 }
 ```
 
-### Ver logs del worker en tiempo real
+### View worker logs in real-time
 
 ```bash
 docker compose logs -f worker
 ```
 
-### Verificar datos en PostgreSQL
+### Verify data in PostgreSQL
 
 ```bash
 docker compose exec db psql -U user -d procesador_csv -c "SELECT COUNT(*) FROM customers;"
@@ -364,150 +364,76 @@ docker compose exec db psql -U user -d procesador_csv -c "SELECT COUNT(*) FROM c
 
 ## 🧪 Testing
 
-El proyecto usa **pytest** con **testcontainers** para tests de integración/E2E con PostgreSQL real.
-
-### Estructura de Tests
-
-```
-src/tests/
-├── unit/           # Tests unitarios (84 tests) - dominio puro, fakes
-├── integration/    # Tests integración (11 tests) - PostgreSQL real via testcontainers
-└── e2e/           # Tests end-to-end (8 tests) - API completa con DB real
-```
-
-**Total: 106 tests**
-
-### Comandos de Testing
-
 ```bash
-# Todos los tests (levanta contenedor PostgreSQL automáticamente)
-docker compose exec app pytest
-
-# Tests unitarios (rápidos, sin Docker adicional)
+# Unit tests
 docker compose exec app pytest src/tests/unit/ -v
 
-# Tests de integración (requieren testcontainers + Docker)
+# Integration tests
 docker compose exec app pytest src/tests/integration/ -v
 
-# Tests E2E (flujo completo API + DB)
+# E2E tests
 docker compose exec app pytest src/tests/e2e/ -v
 
-# Con coverage
-docker compose exec app pytest --cov=src --cov-report=html
-
-# Solo tests marcados
-docker compose exec app pytest -m unit       # Solo unitarios
-docker compose exec app pytest -m integration # Solo integración
-docker compose exec app pytest -m e2e        # Solo E2E
+# All tests
+docker compose exec app pytest
 ```
 
-### Testing con Makefile
+## 🗂️ Project Structure
 
-```bash
-# Tests unitarios
-make test
-
-# Tests de integración
-make test-integration
-
-# Tests E2E
-make test-e2e
-
-# Todos los tests
-make test-all
-
-# Linting
-make lint
-make lint-fix
-```
-
-### Sobre testcontainers
-
-Los tests de integración y E2E usan **testcontainers** para levantar un contenedor PostgreSQL real:
-
-- El contenedor se levanta una vez por sesión de pytest (session-scoped)
-- Se crean las tablas automáticamente antes de cada test
-- Los datos se limpian después de cada test (auto-cleanup)
-- El contenedor se destruye al finalizar la sesión
-
-**Requisitos para testcontainers:**
-- Docker Engine running
-- Privilegios para crear contenedores (docker group o sudo)
-- ~30 segundos extra en la primera ejecución (descarga imagen PostgreSQL)
-
-### Troubleshooting
-
-```bash
-# Si fallan tests por "server closed the connection":
-# - Es normal, el pool de conexiones se cierra al limpiar
-
-# Si testcontainers no levanta:
-docker ps                    # Verificar Docker está corriendo
-docker run hello-world      # Testear permisos
-
-# Para debuggear un test específico:
-docker compose exec app pytest src/tests/path/to/test.py::test_name -v --tb=long
-```
-
-## 🗂️ Estructura del Proyecto
-
-```
+```text
 procesador_csv/
-├── docker-compose.yml          # Servicios: app, worker, db, redis
-├── Dockerfile                  # Multi-stage build con Alpine
-├── docker-entrypoint.sh        # Entrypoint para permisos non-root
-├── alembic.ini                 # Configuración Alembic
-├── pyproject.toml              # Dependencias + configuración proyecto
-├── migrations/                 # Migraciones Alembic
+├── docker-compose.yml          # Services: app, worker, db, redis
+├── Dockerfile                  # Multi-stage build with Alpine
+├── docker-entrypoint.sh        # Entrypoint for non-root permissions
+├── alembic.ini                 # Alembic configuration
+├── pyproject.toml              # Dependencies & project config
+├── migrations/                 # Alembic migrations
 │   ├── env.py
 │   └── versions/
 │       └── c6b4a68c61ab_initial_migration.py
 └── src/
-    ├── domain/                 # Lógica pura, sin frameworks
-    ├── application/            # Casos de uso
-    ├── infrastructure/         # Adaptadores (DB, Celery, Web)
-    └── tests/                  # Tests unitarios, integración, E2E
+    ├── domain/                 # Pure logic, no frameworks
+    ├── application/            # Use cases
+    ├── infrastructure/         # Adapters (DB, Celery, Web)
+    └── tests/                  # Unit, Integration, E2E tests
 ```
 
-## 🔒 Seguridad
+## 🔒 Security
 
-- Contenedores corren como **usuario non-root** (`appuser`, UID 1000)
-- Sin warnings de Celery por superuser privileges
-- Entrypoint fixea permisos de volúmenes compartidos antes de bajar privilegios
+- Containers run as a **non-root user** (`appuser`, UID 1000).
+- No Celery warnings for superuser privileges.
+- Entrypoint fixes shared volume permissions before dropping privileges.
 
-## 🐛 Decisiones de Diseño Importantes
+## 🐛 Key Design Decisions
 
-1. **Race condition DB → App**: Healthcheck en PostgreSQL con `pg_isready`. La app y worker esperan a que la DB esté `(healthy)` antes de iniciar.
+1. **DB → App race condition**: PostgreSQL healthcheck with `pg_isready`. The app and worker wait for the DB to be `(healthy)` before starting.
+2. **Shared volume**: `uploads_data` mounted at `/tmp/procesador_csv/uploads` for both `app` and `worker`. Without this, the worker cannot find files uploaded by the app.
+3. **Automatic Celery retries**: If the worker tries to process before the upload transaction is committed, Celery performs an automatic retry (max 3 attempts, exponential backoff).
+4. **Idempotency**: Each CSV row generates a unique UUID. Reprocessing a chunk does not duplicate customers.
 
-2. **Volumen compartido**: `uploads_data` montado en `/tmp/procesador_csv/uploads` tanto para `app` como `worker`. Sin esto, el worker no encuentra los archivos subidos por la app.
-
-3. **Retry automático Celery**: Si el worker intenta procesar antes de que la transacción del upload se haya commiteado, Celery hace retry automático (max 3 intentos, backoff exponencial).
-
-4. **Idempotencia**: Cada fila del CSV genera un UUID único. Reprocesar un chunk no duplica customers.
-
-## 📦 Migraciones de Base de Datos
+## 📦 Database Migrations
 
 ```bash
-# Crear nueva migración automáticamente
-docker compose exec app alembic revision --autogenerate -m "descripción"
+# Automatically create new migration
+docker compose exec app alembic revision --autogenerate -m "description"
 
-# Aplicar migraciones
+# Apply migrations
 docker compose exec app alembic upgrade head
 
-# Ver versión actual
+# View current version
 docker compose exec app alembic current
 ```
 
-## 🛑 Detener servicios
+## 🛑 Stopping services
 
 ```bash
-# Bajar conservando datos
+# Bring down preserving data
 docker compose down
 
-# Bajar eliminando TODO (incluyendo volúmenes de DB)
+# Bring down deleting EVERYTHING (including DB volumes)
 docker compose down -v
 ```
 
-## 📝 Licencia
+## 📝 License
 
 MIT

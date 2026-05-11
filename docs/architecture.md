@@ -1,92 +1,92 @@
-# Decisiones de Arquitectura — Procesador CSV
+# Architecture Decisions — CSV Processor
 
-Documento de registro de decisiones técnicas (ADR-lite). Cada sección responde a la pregunta: **¿por qué esto y no otra cosa?**
+Lightweight Architecture Decision Records (ADR-lite). Each section answers the question: **why this and not something else?**
 
 ---
 
-## 1. Arquitectura Hexagonal (Ports & Adapters)
+## 1. Hexagonal Architecture (Ports & Adapters)
 
-**Decisión:** El dominio vive en `src/domain/` sin importar ningún framework.
+**Decision:** The domain lives in `src/domain/` without importing any frameworks.
 
-**Problema:** En proyectos donde FastAPI, SQLAlchemy y Pydantic se mezclan directamente con la lógica de negocio, cambiar un ORM o un framework implica reescribir todo. Las reglas de negocio quedan atadas a decisiones de infraestructura.
+**Problem:** In projects where FastAPI, SQLAlchemy, and Pydantic are mixed directly with business logic, changing an ORM or a framework means rewriting everything. Business rules become tied to infrastructure decisions.
 
-**Solución:** Separar en tres capas con regla de dependencia estricta:
+**Solution:** Separate into three layers with a strict dependency rule:
 
-```
+```text
 domain ← application ← infrastructure
 ```
 
-- `domain` no importa nada externo
-- `application` importa solo `domain`
-- `infrastructure` importa `application` y `domain`, y puede usar frameworks
+- `domain` imports nothing external.
+- `application` only imports `domain`.
+- `infrastructure` imports `application` and `domain`, and can use frameworks.
 
-**Consecuencia práctica:** Se puede testear toda la lógica de negocio sin levantar base de datos ni servidor HTTP. Los tests unitarios corren en milisegundos.
+**Practical consequence:** All business logic can be tested without spinning up a database or HTTP server. Unit tests run in milliseconds.
 
-**Alternativa descartada:** Arquitectura en capas tradicional (Controller → Service → Repository con herencia). El problema es que `Service` termina importando ORM directamente, acoplando negocio a infraestructura.
+**Discarded alternative:** Traditional layered architecture (Controller → Service → Repository with inheritance). The problem is that the `Service` ends up directly importing the ORM, coupling business to infrastructure.
 
 ---
 
-## 2. `typing.Protocol` en lugar de clases abstractas para los puertos
+## 2. `typing.Protocol` instead of abstract classes for ports
 
-**Decisión:** `CustomerRepository`, `FileStorage`, `UnitOfWork`, etc. son `Protocol`, no `ABC`.
+**Decision:** `CustomerRepository`, `FileStorage`, `UnitOfWork`, etc. are `Protocol`s, not `ABC`s.
 
-**Problema:** Con `ABC`, las implementaciones deben heredar explícitamente. Eso es acoplamiento estructural: la infra conoce el contrato del dominio vía herencia.
+**Problem:** With `ABC`s, implementations must explicitly inherit. That's structural coupling: infrastructure knows the domain contract via inheritance.
 
-**Solución:** `Protocol` permite duck typing estructural. Cualquier clase que implemente los métodos correctos satisface el contrato, sin necesidad de `import` explícito desde el dominio.
+**Solution:** `Protocol` allows for structural duck typing. Any class that implements the correct methods satisfies the contract, without needing an explicit `import` from the domain.
 
 ```python
-# Las fakes de tests NO importan los protocolos del dominio
+# Test fakes DO NOT import domain protocols
 class FakeTaskRepository:
     def get(self, task_id: UUID) -> ProcessingTask | None: ...
     def save(self, task: ProcessingTask) -> None: ...
 ```
 
-**Consecuencia práctica:** Los fakes de testing son simples clases Python. Sin herencia, sin `super()`, sin dependencias cruzadas.
+**Practical consequence:** Testing fakes are simple Python classes. No inheritance, no `super()`, no cross dependencies.
 
 ---
 
-## 3. Value Objects inmutables para Email, Url y SubscriptionDate
+## 3. Immutable Value Objects for Email, Url and SubscriptionDate
 
-**Decisión:** Los campos validados del dominio son value objects con `@dataclass(frozen=True)`, no strings primitivos.
+**Decision:** Validated domain fields are value objects with `@dataclass(frozen=True)`, not primitive strings.
 
-**Problema:** Si `email` es un `str`, cualquier parte del código puede asignarle `"esto no es un email"` y el error se descubre tarde, en producción.
+**Problem:** If `email` is a `str`, any part of the code can assign `"this is not an email"` to it, and the error will be discovered late, in production.
 
-**Solución:** Encapsular el formato y las reglas de validez dentro del tipo. Un `Email` inválido no puede existir — falla en construcción.
+**Solution:** Encapsulate the format and validity rules within the type. An invalid `Email` cannot exist — it fails on construction.
 
 ```python
-email = Email("no-es-un-email")  # → ValidationFailed en __post_init__
+email = Email("not-an-email")  # → ValidationFailed in __post_init__
 ```
 
-**Consecuencia práctica:** Si tenés un `Email` en mano, ya está validado. No necesitás re-validar en cada función que lo recibe.
+**Practical consequence:** If you hold an `Email` object, it's already validated. You don't need to re-validate it in every function that receives it.
 
-**Alternativa descartada:** Pydantic validators directo en la entidad. El problema es que introduce dependencia de Pydantic en el dominio, violando la regla de dependencia.
+**Discarded alternative:** Direct Pydantic validators on the entity. The problem is that it introduces a Pydantic dependency into the domain, violating the dependency rule.
 
 ---
 
-## 4. State Machine explícita en `ProcessingTask`
+## 4. Explicit State Machine in `ProcessingTask`
 
-**Decisión:** Las transiciones de estado (`PENDING → PROCESSING → COMPLETED | FAILED`) están codificadas como tabla de transiciones válidas en el dominio.
+**Decision:** State transitions (`PENDING → PROCESSING → COMPLETED | FAILED`) are encoded as a valid transitions table in the domain.
 
-**Problema:** Sin máquina de estados, cualquier código puede hacer `task.status = "COMPLETED"` saltando el flujo correcto. Los bugs de estado son difíciles de rastrear.
+**Problem:** Without a state machine, any code can do `task.status = "COMPLETED"`, skipping the correct flow. State bugs are hard to track down.
 
-**Solución:** `transition_to()` valida contra `_VALID_TRANSITIONS` y lanza `ValidationFailed` si la transición es ilegal.
+**Solution:** `transition_to()` validates against `_VALID_TRANSITIONS` and raises `ValidationFailed` if the transition is illegal.
 
 ```python
-# PENDING no puede ir directo a COMPLETED
+# PENDING cannot go straight to COMPLETED
 task.transition_to(TaskStatus.COMPLETED)  # → ValidationFailed
 ```
 
-**Consecuencia práctica:** Es imposible que una tarea pase a `COMPLETED` sin haber pasado por `PROCESSING`. El flujo incorrecto es un error en tiempo de ejecución, no un bug silencioso.
+**Practical consequence:** It is impossible for a task to transition to `COMPLETED` without having gone through `PROCESSING`. An incorrect flow results in a runtime error, not a silent bug.
 
 ---
 
-## 5. Unit of Work como context manager
+## 5. Unit of Work as a context manager
 
-**Decisión:** `UnitOfWork` es un `Protocol` con `__enter__` / `__exit__` y `commit()` / `rollback()` explícito.
+**Decision:** `UnitOfWork` is a `Protocol` with `__enter__` / `__exit__` and explicit `commit()` / `rollback()`.
 
-**Problema:** Si `CustomerRepository.add_bulk()` y `ErrorRepository.add_bulk()` usan transacciones independientes, pueden quedar en estado inconsistente si una de las dos falla a mitad.
+**Problem:** If `CustomerRepository.add_bulk()` and `ErrorRepository.add_bulk()` use independent transactions, they can end up in an inconsistent state if one fails halfway through.
 
-**Solución:** Ambas operaciones ocurren dentro del mismo `with uow:`. El `__exit__` hace rollback automático si sale por excepción.
+**Solution:** Both operations occur within the same `with uow:`. The `__exit__` method performs an automatic rollback if it exits with an exception.
 
 ```python
 with self._uow:
@@ -94,83 +94,83 @@ with self._uow:
     self._error_repo.add_bulk(errors)
     self._task_repo.save(task)
     self._uow.commit()
-# Si algo falla → rollback automático. Atomicidad garantizada.
+# If anything fails → automatic rollback. Atomicity guaranteed.
 ```
 
-**Consecuencia práctica:** Nunca queda la tabla `customers` actualizada y la tabla `processing_tasks` sin actualizar.
+**Practical consequence:** You will never have an updated `customers` table and an outdated `processing_tasks` table.
 
 ---
 
-## 6. Strategy Pattern para reglas de validación
+## 6. Strategy Pattern for validation rules
 
-**Decisión:** `EmailRule`, `UrlRule` y `DateRule` son clases separadas que implementan el mismo `ValidationRule` Protocol.
+**Decision:** `EmailRule`, `UrlRule`, and `DateRule` are separate classes that implement the same `ValidationRule` Protocol.
 
-**Problema:** Una función `validate_row()` con 15 ifs se vuelve inmantenible. Agregar una nueva regla implica modificar la función existente (violación de Open/Closed).
+**Problem:** A `validate_row()` function with 15 ifs becomes unmaintainable. Adding a new rule means modifying the existing function (Open/Closed violation).
 
-**Solución:** Cada regla es una clase. Agregar una regla nueva = crear una clase nueva. `ProcessChunk` recibe la lista de reglas por constructor (inyección de dependencias).
+**Solution:** Each rule is a class. Adding a new rule = creating a new class. `ProcessChunk` receives the list of rules via its constructor (dependency injection).
 
 ```python
-# Agregar validación de teléfono no toca ProcessChunk
+# Adding phone validation doesn't touch ProcessChunk
 rules = [EmailRule(), UrlRule(), DateRule(), PhoneRule()]
 ```
 
-**Consecuencia práctica:** Las reglas son testeables de forma aislada. El orden de aplicación es configurable.
+**Practical consequence:** Rules are testable in isolation. Application order is configurable.
 
 ---
 
-## 7. Celery con chunks independientes en lugar de un task por archivo
+## 7. Celery with independent chunks instead of a single task per file
 
-**Decisión:** Cada chunk del CSV es una tarea Celery separada, no un único task que procesa todo el archivo.
+**Decision:** Each CSV chunk is a separate Celery task, rather than a single task processing the entire file.
 
-**Problema:** Un task único que procesa 100.000 filas tarda minutos. Si el worker se cae a mitad, se pierde todo el trabajo y hay que reiniciar desde cero.
+**Problem:** A single task processing 100,000 rows takes minutes. If the worker crashes halfway through, all work is lost and must be restarted from scratch.
 
-**Solución:** Dividir el archivo en N chunks de `CHUNK_SIZE` filas. Cada chunk es una tarea independiente con retry automático.
+**Solution:** Divide the file into N chunks of `CHUNK_SIZE` rows. Each chunk is an independent task with automatic retries.
 
+```text
+File with 10,000 rows, CHUNK_SIZE=1000
+→ 10 independent Celery tasks
+→ If chunk 5 fails → only chunk 5 is retried
+→ Chunks 1-4 are already persisted
 ```
-Archivo de 10.000 filas, CHUNK_SIZE=1000
-→ 10 tareas Celery independientes
-→ Si el chunk 5 falla → solo se reintenta el chunk 5
-→ Los chunks 1-4 ya están persistidos
-```
 
-**Consecuencia práctica:** Resiliencia ante fallos del worker. Paralelismo real: múltiples workers procesan diferentes chunks simultáneamente.
+**Practical consequence:** Resilience against worker failures. Real parallelism: multiple workers process different chunks simultaneously.
 
-**Tradeoff:** Mayor overhead de Redis (N mensajes en lugar de 1). Para archivos pequeños (<1000 filas) el overhead es irrelevante; para archivos grandes el beneficio supera el costo.
+**Tradeoff:** Higher Redis overhead (N messages instead of 1). For small files (<1000 rows), the overhead is irrelevant; for large files, the benefits outweigh the costs.
 
 ---
 
-## 8. Separación de FileStorage y base de datos
+## 8. Separation of FileStorage and database
 
-**Decisión:** Los archivos CSV se guardan en disco (`/tmp/procesador_csv/uploads`), no en PostgreSQL. La DB solo almacena metadatos y datos procesados.
+**Decision:** CSV files are saved to disk (`/tmp/procesador_csv/uploads`), not in PostgreSQL. The DB only stores metadata and processed data.
 
-**Problema:** Guardar archivos binarios grandes en PostgreSQL es posible pero ineficiente. Aumenta el tamaño de la DB, complica backups, y el ORM no está optimizado para streaming de binarios.
+**Problem:** Saving large binary files in PostgreSQL is possible but inefficient. It bloats the DB size, complicates backups, and the ORM is not optimized for streaming binaries.
 
-**Solución:** El archivo vive en el filesystem, la DB guarda el `file_path`. El port `FileStorage` abstrae el medio de almacenamiento — puede ser filesystem local, S3, GCS, etc.
+**Solution:** The file lives on the filesystem, the DB stores the `file_path`. The `FileStorage` port abstracts the storage medium — it could be local filesystem, S3, GCS, etc.
 
-**Consecuencia práctica:** Migrar de almacenamiento local a S3 implica implementar una nueva clase que satisfaga el `FileStorage` Protocol. La lógica de negocio no cambia.
-
----
-
-## 9. `create_app()` como factory en lugar de módulo-level
-
-**Decisión:** La aplicación FastAPI se crea dentro de una función `create_app()`, no como variable global del módulo.
-
-**Problema:** Una instancia global de FastAPI hace difícil testear con configuraciones distintas (ej: SQLite en tests, PostgreSQL en producción). Los `dependency_overrides` en tests son más complicados de manejar.
-
-**Solución:** `create_app()` permite instanciar la app múltiples veces con configuraciones distintas. Uvicorn la invoca con `--factory`.
-
-**Consecuencia práctica:** Los tests de routers pueden crear su propia instancia con overrides sin afectar otras instancias.
+**Practical consequence:** Migrating from local storage to S3 means implementing a new class that satisfies the `FileStorage` Protocol. Business logic remains unchanged.
 
 ---
 
-## 10. Health check con chequeo activo de dependencias
+## 9. `create_app()` as a factory instead of module-level
 
-**Decisión:** `GET /api/v1/health` ejecuta `SELECT 1` contra PostgreSQL y `PING` contra Redis en cada request.
+**Decision:** The FastAPI application is created inside a `create_app()` function, not as a global module variable.
 
-**Problema:** Un health check que solo retorna `{"status": "ok"}` no detecta si la DB está caída. El load balancer lo considera sano y sigue enrutando tráfico a una app que no puede persistir nada.
+**Problem:** A global FastAPI instance makes it hard to test with different configurations (e.g., SQLite in tests, PostgreSQL in production). Test `dependency_overrides` become harder to manage.
 
-**Solución:** Chequeos activos con timeout corto (2 segundos). Si alguno falla → HTTP 503. El load balancer saca el pod del rotation.
+**Solution:** `create_app()` allows instantiating the app multiple times with different configurations. Uvicorn invokes it with `--factory`.
 
-**Tradeoff:** Cada request a `/health` genera una query a DB y una conexión a Redis. Para evitar sobrecarga, configurar el health check del load balancer con intervalo mínimo de 10-30 segundos, no 1 segundo.
+**Practical consequence:** Router tests can create their own instance with overrides without affecting other instances.
 
-**Workers de Celery:** No se chequean en este endpoint. Determinar si un worker está vivo requiere `celery inspect ping`, que tiene latencia variable y puede bloquear. La disponibilidad de workers se monitorea a nivel de infraestructura (Flower, métricas de Celery).
+---
+
+## 10. Health check with active dependency checks
+
+**Decision:** `GET /api/v1/health` executes `SELECT 1` against PostgreSQL and `PING` against Redis on every request.
+
+**Problem:** A health check that only returns `{"status": "ok"}` won't detect if the DB is down. The load balancer will consider it healthy and keep routing traffic to an app that can't persist anything.
+
+**Solution:** Active checks with a short timeout (2 seconds). If any fails → HTTP 503. The load balancer pulls the pod out of rotation.
+
+**Tradeoff:** Every request to `/health` generates a DB query and a Redis connection. To avoid overload, configure the load balancer health check with a minimum interval of 10-30 seconds, not 1 second.
+
+**Celery Workers:** Not checked on this endpoint. Determining if a worker is alive requires `celery inspect ping`, which has variable latency and can block. Worker availability is monitored at the infrastructure level (Flower, Celery metrics).

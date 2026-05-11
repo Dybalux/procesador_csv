@@ -1,39 +1,39 @@
-# 📋 Guía de Requerimientos: Procesador de CSV Asíncrono
+# 📋 Requirements Guide: Asynchronous CSV Processor
 
-## 🎯 Objetivo del Proyecto
-Construir una aplicación backend robusta para procesar archivos CSV pesados (específicamente el dataset de "Customers"). El sistema debe demostrar buenas prácticas de arquitectura, manejo eficiente de memoria mediante lectura por chunks, ejecución de tareas en segundo plano y validación estricta de datos.
+## 🎯 Project Objective
+Build a robust backend application to process large CSV files (specifically the "Customers" dataset). The system must demonstrate good architectural practices, efficient memory management via chunked reading, background task execution, and strict data validation.
 
-## 🏗️ Stack Tecnológico
+## 🏗️ Tech Stack
 - **API Framework:** FastAPI (Python)
-- **Message Broker / Cola de Tareas:** Celery + Redis
-- **Base de Datos:** PostgreSQL
-- **Validación de Datos:** Pydantic
-- **Infraestructura Local:** Docker y Docker Compose
+- **Message Broker / Task Queue:** Celery + Redis
+- **Database:** PostgreSQL
+- **Data Validation:** Pydantic
+- **Local Infrastructure:** Docker and Docker Compose
 
-## ✅ Requerimientos Funcionales
+## ✅ Functional Requirements
 
-1. **Subida de Archivos (`POST /api/v1/upload`)**
-   - El sistema debe recibir un archivo CSV.
-   - Debe guardar el archivo temporalmente y encolar la tarea.
-   - Debe devolver un `task_id` (HTTP 202 Accepted) de forma **inmediata** sin esperar a que el archivo sea procesado.
+1. **File Upload (`POST /api/v1/upload`)**
+   - The system must accept a CSV file.
+   - It must temporarily save the file and enqueue the processing task.
+   - It must **immediately** return a `task_id` (HTTP 202 Accepted) without waiting for the file to be processed.
 
-2. **Consulta de Estado (`GET /api/v1/tasks/{task_id}`)**
-   - El usuario debe poder consultar el estado actual del procesamiento usando el `task_id`.
-   - Estados posibles: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`.
+2. **Status Check (`GET /api/v1/tasks/{task_id}`)**
+   - The user must be able to check the current processing status using the `task_id`.
+   - Possible statuses: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`.
 
-3. **Procesamiento y Validación (Worker Celery)**
-   - El sistema debe procesar el CSV **por bloques (chunks)** para no saturar la memoria RAM.
-   - Cada fila se validará estrictamente:
-     - `Email`: Formato de correo válido.
-     - `Website`: Formato de URL válido.
-     - `Subscription Date`: Fecha válida.
-   - **Tolerancia a fallos:** Si una fila es inválida, el proceso NO se detiene. Se ignora la fila y el error se registra.
+3. **Processing and Validation (Celery Worker)**
+   - The system must process the CSV in **blocks (chunks)** to avoid saturating RAM.
+   - Every row must be strictly validated:
+     - `Email`: Valid email format.
+     - `Website`: Valid URL format.
+     - `Subscription Date`: Valid date.
+   - **Fault Tolerance:** If a row is invalid, the process DOES NOT stop. The row is ignored, and the error is logged.
 
-4. **Persistencia de Datos**
-   - Los registros válidos se guardan en la tabla principal de datos (`customers`).
-   - Los registros inválidos se guardan en una tabla de `validation_errors` detallando el `task_id`, el número de fila, los datos originales y el motivo del fallo.
+4. **Data Persistence**
+   - Valid records are saved in the main data table (`customers`).
+   - Invalid records are saved in a `validation_errors` table detailing the `task_id`, the row number, the original data, and the failure reason.
 
-## 🚀 Requerimientos No Funcionales (Calidad y Diseño)
-- **Arquitectura Limpia:** Separación clara entre la capa de red (Routers), reglas de negocio (Services), tareas asíncronas (Workers) y acceso a datos (Repositories).
-- **Eficiencia:** Consumo de memoria controlado independientemente del tamaño del CSV.
-- **Resiliencia:** Manejo de excepciones y caídas de base de datos sin crashear la API principal.
+## 🚀 Non-Functional Requirements (Quality and Design)
+- **Clean Architecture:** Clear separation between the network layer (Routers), business rules (Services), asynchronous tasks (Workers), and data access (Repositories).
+- **Efficiency:** Controlled memory consumption regardless of the CSV size.
+- **Resilience:** Exception handling and database connection drops managed without crashing the main API.
