@@ -1,4 +1,4 @@
-"""Router para consulta de estado de tareas."""
+"""Endpoint para consulta de estado de tareas."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from domain.exceptions import TaskNotFound
 from domain.ports import TaskRepository
 from infrastructure.web.dependencies import get_task_repo
 
-router = APIRouter()
+router = APIRouter(tags=["tasks"])
 
 
 @router.get(
-    "/api/v1/tasks/{task_id}",
+    "/tasks/{task_id}",
     response_model=TaskStatusDTO,
 )
 def get_task_status(

@@ -6,8 +6,9 @@ WORKDIR /app
 RUN apk add --no-cache postgresql-dev gcc musl-dev linux-headers
 RUN pip install --no-cache-dir --upgrade pip
 
-COPY pyproject.toml requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml ./
+COPY src/ ./src/
+RUN pip install --no-cache-dir .
 
 FROM python:3.11-alpine
 

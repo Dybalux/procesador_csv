@@ -18,7 +18,11 @@ def _make_app():
 
     # Force reimport of infrastructure modules with SQLite config
     for key in list(sys.modules.keys()):
-        if key.startswith("infrastructure.web") or key.startswith("infrastructure.db"):
+        if (
+            key.startswith("infrastructure.web")
+            or key.startswith("infrastructure.db")
+            or key.startswith("api.v1")
+        ):
             del sys.modules[key]
 
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
