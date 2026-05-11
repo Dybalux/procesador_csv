@@ -44,9 +44,6 @@ class TestFullFlow:
         task_id = upload(csv_content, "customers.csv")
         db_session.commit()  # Asegurar que la tarea se guarde
 
-        # Refrescar para obtener el objeto actualizado
-        db_session.refresh(task_repo.get(task_id))
-
         # Ajustar total_rows para que ProcessChunk transicione a COMPLETED
         task = task_repo.get(task_id)
         assert task is not None

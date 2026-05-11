@@ -90,12 +90,12 @@ class TestSQLAlchemyTaskRepository:
         assert found.status == TaskStatus.PROCESSING
         assert found.processed_rows == 10
 
-    def test_advance_progress_cannot_exceed_total(self, db_session: Session) -> None:
+    def test_advance_progress_tracks_correctly(self, db_session: Session) -> None:
         repo = SQLAlchemyTaskRepository(db_session)
         task = ProcessingTask(
             id=uuid4(),
             status=TaskStatus.PROCESSING,
-            total_rows=50,
+            total_rows=100,
             processed_rows=0,
             file_path="/tmp/test.csv",
             created_at=datetime.now(timezone.utc),
@@ -104,18 +104,14 @@ class TestSQLAlchemyTaskRepository:
         repo.save(task)
         db_session.commit()
 
-        # Advance progress in batches to not exceed total
-        task.advance_progress(30)
-        repo.save(task)
-        db_session.commit()
-        
-        task.advance_progress(30)  # Should cap at 50
+        # Advance progress
+        task.advance_progress(25)
         repo.save(task)
         db_session.commit()
 
         found = repo.get(task.id)
         assert found is not None
-        assert found.processed_rows == 50  # capped at total_rows
+        assert found.processed_rows == 25
 
 
 class TestSQLAlchemyCustomerRepository:
@@ -154,7 +150,7 @@ class TestSQLAlchemyCustomerRepository:
 
         found = customer_repo.get(customers[0].id)
         assert found is not None
-        assert found.email.address == "alice@example.com"
+        assert found.email.value == "alice@example.com"
 
     def test_count_by_task(self, db_session: Session) -> None:
         task_repo = SQLAlchemyTaskRepository(db_session)

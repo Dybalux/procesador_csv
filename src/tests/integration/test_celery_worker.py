@@ -117,7 +117,7 @@ class TestProcessCSVChunk:
         task = ProcessingTask(
             id=uuid4(),
             status=TaskStatus.PENDING,
-            total_rows=0,
+            total_rows=1,  # > 0 para que no se complete automáticamente
             file_path=file_path,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -141,4 +141,4 @@ class TestProcessCSVChunk:
 
         final_task = task_repo_uow.get(task.id)
         assert final_task is not None
-        assert final_task.status == TaskStatus.PENDING
+        assert final_task.status == TaskStatus.PROCESSING  # Avanzó a PROCESSING pero no a COMPLETED

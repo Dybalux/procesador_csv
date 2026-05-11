@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from domain.entities import Customer, ProcessingTask, RowValidationError, TaskStatus
+from domain.value_objects import Email, SubscriptionDate, Url
 from infrastructure.db.models import CustomerORM, ProcessingTaskORM, RowValidationErrorORM
 
 
