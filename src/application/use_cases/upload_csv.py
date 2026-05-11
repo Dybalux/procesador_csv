@@ -19,9 +19,9 @@ class UploadCSV:
         self._file_storage = file_storage
         self._task_repo = task_repo
 
-    def __call__(self, file_content: bytes, filename: str) -> UUID:
+    def __call__(self, file_content: bytes, filename: str, total_rows: int | None = None) -> UUID:
         """Guarda el archivo, crea tarea PENDING y retorna su ID."""
         file_path = self._file_storage.save(filename, file_content)
-        task = ProcessingTask(id=uuid4(), file_path=file_path)
+        task = ProcessingTask(id=uuid4(), file_path=file_path, total_rows=total_rows)
         self._task_repo.save(task)
         return task.id

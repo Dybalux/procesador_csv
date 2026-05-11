@@ -47,13 +47,14 @@ def upload_csv(
             detail="File too large",
         )
 
-    use_case = UploadCSV(file_storage, task_repo)
-    task_id = use_case(content, file.filename)
-
-    # Calcular número de chunks y encolar automáticamente
+    # Contar filas para setear total_rows y calcular chunks
     file_like = io.StringIO(content.decode("utf-8"))
     row_count = sum(1 for _ in csv.DictReader(file_like))
 
+    use_case = UploadCSV(file_storage, task_repo)
+    task_id = use_case(content, file.filename, total_rows=row_count)
+
+    # Encolar chunks automáticamente
     for chunk_offset in range(0, row_count, settings.CHUNK_SIZE):
         process_csv_chunk.delay(str(task_id), chunk_offset)
 
