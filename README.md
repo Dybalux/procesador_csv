@@ -86,6 +86,83 @@ Esperar a ver:
 docker compose exec app alembic upgrade head
 ```
 
+## ⚙️ Configuración
+
+Toda la configuración se realiza mediante **variables de entorno** (principio 12-factor app). Puedes modificar los valores editando el archivo `docker-compose.yml` o creando un archivo `.env` en la raíz del proyecto.
+
+### Variables disponibles
+
+#### Base de datos (`src/infrastructure/db/connection.py`)
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql+psycopg2://user:pass@db/procesador_csv` | URL de conexión a PostgreSQL |
+| `DB_POOL_SIZE` | `5` | Conexiones mantenidas permanentemente en el pool |
+| `DB_MAX_OVERFLOW` | `10` | Conexiones extras que se pueden crear bajo demanda |
+| `DB_POOL_TIMEOUT` | `30` | Segundos de espera antes de lanzar error si el pool está lleno |
+| `DB_ECHO` | `false` | Si es `true`, SQLAlchemy imprime todas las queries en stdout |
+
+#### Celery (`src/infrastructure/celery/config.py`, `docker-compose.yml`)
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `CELERY_BROKER_URL` | `redis://redis:6379/0` | URL del broker Redis |
+| `CELERY_RESULT_BACKEND` | `redis://redis:6379/0` | URL del backend de resultados |
+| `CELERY_CONCURRENCY` | `4` | Número de workers de Celery ejecutándose en paralelo |
+| `CELERY_WORKER_PREFETCH_MULTIPLIER` | `1` | Cuántas tareas reserva cada worker por adelantado |
+
+#### Procesamiento de CSV (`src/infrastructure/celery/tasks.py`, `src/infrastructure/web/routers/upload.py`)
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `CHUNK_SIZE` | `1000` | Cantidad de filas que cada tarea Celery procesa en un batch |
+| `MAX_FILE_SIZE` | `104857600` | Tamaño máximo de archivo en bytes (default: 100 MB) |
+
+> **Tip:** Si subís un CSV de 10.000 filas con `CHUNK_SIZE=1000`, se crearán 10 tareas Celery. Con `CHUNK_SIZE=100`, se crearán 100 tareas (más granularidad, más overhead).
+
+#### API — Uvicorn (`start-app.sh`)
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `UVICORN_HOST` | `0.0.0.0` | Interface de red donde escucha la API |
+| `UVICORN_PORT` | `8000` | Puerto de la API |
+| `UVICORN_WORKERS` | `2` | Número de procesos workers de Uvicorn |
+| `UVICORN_RELOAD` | `false` | Solo desarrollo: recarga automática al detectar cambios |
+
+> **Tip:** Para máquinas con muchas CPUs, subí `UVICORN_WORKERS` a `4` y `CELERY_CONCURRENCY` a `8` para aprovechar el hardware.
+
+#### Storage (`src/infrastructure/storage/local_file_storage.py`)
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `UPLOAD_BASE_DIR` | `/tmp/procesador_csv/uploads` | Directorio donde se guardan temporalmente los CSV subidos |
+
+### Ejemplo: override rápido desde la línea de comandos
+
+```bash
+# Levantar con más workers de Celery y chunks más pequeños
+CELERY_CONCURRENCY=8 CHUNK_SIZE=500 docker compose up -d
+```
+
+### Ejemplo: usando un archivo `.env`
+
+Crea un archivo `.env` en la raíz del proyecto:
+
+```bash
+# .env
+CHUNK_SIZE=500
+MAX_FILE_SIZE=52428800
+CELERY_CONCURRENCY=8
+UVICORN_WORKERS=4
+DB_POOL_SIZE=10
+```
+
+Luego levantá los servicios normalmente:
+
+```bash
+docker compose up -d
+```
+
 ## 🎯 Uso
 
 ### Subir un archivo CSV
