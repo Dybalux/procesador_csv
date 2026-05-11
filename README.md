@@ -28,6 +28,161 @@ src/
 
 **Principio clave:** El dominio NO importa frameworks (FastAPI, Celery, SQLAlchemy, Pydantic).
 
+## 📖 Casos de Uso
+
+La capa de aplicación expone tres casos de uso principales que orquestan el flujo completo de procesamiento de CSV.
+
+### `UploadCSV` — Subir un archivo CSV
+
+**Responsabilidad:** Recibe el contenido de un archivo CSV, lo persiste en disco, crea una tarea de procesamiento en estado `PENDING`, y encola automáticamente todos los chunks en Celery para procesamiento en background.
+
+**Entrada:**
+- `file_content` (bytes): contenido del archivo
+- `filename` (str): nombre original del archivo
+
+**Salida:**
+- `task_id` (UUID): identificador único de la tarea creada
+
+**Flujo interno:**
+```
+Valida extensión .csv y tamaño máximo
+    → Guarda archivo en disco vía FileStorage
+    → Crea ProcessingTask(status=PENDING)
+    → Persiste tarea vía TaskRepository
+    → Cuenta filas del CSV
+    → Encola N tareas Celery (una por chunk)
+    → Retorna task_id
+```
+
+**Endpoint:** `POST /api/v1/upload`
+
+---
+
+### `GetTaskStatus` — Consultar estado de una tarea
+
+**Responsabilidad:** Busca una tarea de procesamiento por su ID y retorna un DTO con el estado actual, filas procesadas, total de filas y fecha de creación.
+
+**Entrada:**
+- `task_id` (UUID): identificador de la tarea
+
+**Salida:**
+- `TaskStatusDTO`: `{ status, processed_rows, total_rows, created_at }`
+
+**Excepciones:**
+- `TaskNotFound`: si la tarea no existe en la base de datos
+
+**Flujo interno:**
+```
+Recibe task_id
+    → Busca tarea vía TaskRepository.get()
+    → Si no existe → lanza TaskNotFound
+    → Mapea a TaskStatusDTO
+    → Retorna DTO
+```
+
+**Endpoint:** `GET /api/v1/tasks/{task_id}`
+
+---
+
+### `ProcessChunk` — Procesar un lote de filas CSV
+
+**Responsabilidad:** Procesa un chunk de filas CSV aplicando reglas de validación en orden, separa filas válidas de inválidas, persiste ambas en bulk dentro de una unidad de trabajo atómica, y actualiza el contador de filas procesadas de la tarea.
+
+**Entrada:**
+- `task_id` (UUID): identificador de la tarea padre
+- `rows` (list[dict]): lista de filas del chunk
+- `chunk_offset` (int): número de fila inicial (para calcular row_number)
+
+**Salida:**
+- `ChunkResult`: `{ valid_count, error_count }`
+
+**Flujo interno:**
+```
+Recibe task_id + rows + chunk_offset
+    → Busca tarea → si no existe → lanza TaskNotFound
+    → Si estado es PENDING → transition_to(PROCESSING)
+    → Por cada fila:
+        - Aplica reglas de validación (EmailRule, UrlRule, DateRule)
+        - Si válida → construye Customer → lista valid
+        - Si inválida → construye RowValidationError → lista errors
+    → Abre UnitOfWork
+        - CustomerRepository.add_bulk(valid)
+        - ErrorRepository.add_bulk(errors)
+        - TaskRepository.save(task) con advance_progress()
+        - Si processed_rows >= total_rows → transition_to(COMPLETED)
+        - commit()
+    → Retorna ChunkResult
+```
+
+**Ejecutado por:** Worker de Celery (background, asíncrono)
+
+---
+
+### 🔄 Flujo completo end-to-end
+
+```
+┌─────────────┐     POST /api/v1/upload      ┌─────────────┐
+│   Usuario   │ ───────────────────────────→ │   FastAPI   │
+│  (Cliente)  │                              │   (app)     │
+└─────────────┘                              └──────┬──────┘
+       ↑                                            │
+       │           {"task_id": "xxx"}               │
+       └────────────────────────────────────────────┘
+
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │  UploadCSV   │
+                    │  - Guarda    │
+                    │    archivo   │
+                    │  - Crea      │
+                    │    tarea     │
+                    │  - Encola    │
+                    │    chunks    │
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │     Redis    │
+                    │   (Broker)   │
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │    Celery    │
+                    │   (worker)   │
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │ ProcessChunk │
+                    │  - Valida    │
+                    │  - Persiste  │
+                    │  - Actualiza │
+                    │    contador  │
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │  PostgreSQL  │
+                    │     (DB)     │
+                    └──────────────┘
+
+       GET /api/v1/tasks/{task_id}
+       ─────────────────────────────→
+       ←─────────────────────────────
+       {"status": "PROCESSING",
+        "processed_rows": 1000}
+```
+
+**Estados de una tarea:**
+- `PENDING` → tarea creada, esperando procesamiento
+- `PROCESSING` → al menos un chunk está siendo procesado
+- `COMPLETED` → todos los chunks procesados (si total_rows es conocido)
+- `FAILED` → ocurrió un error irrecuperable
+
+---
+
 ## 🚀 Stack Tecnológico
 
 - **Python 3.11** + Alpine Linux
