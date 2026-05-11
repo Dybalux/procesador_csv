@@ -364,18 +364,89 @@ docker compose exec db psql -U user -d procesador_csv -c "SELECT COUNT(*) FROM c
 
 ## 🧪 Testing
 
+El proyecto usa **pytest** con **testcontainers** para tests de integración/E2E con PostgreSQL real.
+
+### Estructura de Tests
+
+```
+src/tests/
+├── unit/           # Tests unitarios (84 tests) - dominio puro, fakes
+├── integration/    # Tests integración (11 tests) - PostgreSQL real via testcontainers
+└── e2e/           # Tests end-to-end (8 tests) - API completa con DB real
+```
+
+**Total: 106 tests**
+
+### Comandos de Testing
+
 ```bash
-# Tests unitarios
+# Todos los tests (levanta contenedor PostgreSQL automáticamente)
+docker compose exec app pytest
+
+# Tests unitarios (rápidos, sin Docker adicional)
 docker compose exec app pytest src/tests/unit/ -v
 
-# Tests de integración
+# Tests de integración (requieren testcontainers + Docker)
 docker compose exec app pytest src/tests/integration/ -v
 
-# Tests E2E
+# Tests E2E (flujo completo API + DB)
 docker compose exec app pytest src/tests/e2e/ -v
 
+# Con coverage
+docker compose exec app pytest --cov=src --cov-report=html
+
+# Solo tests marcados
+docker compose exec app pytest -m unit       # Solo unitarios
+docker compose exec app pytest -m integration # Solo integración
+docker compose exec app pytest -m e2e        # Solo E2E
+```
+
+### Testing con Makefile
+
+```bash
+# Tests unitarios
+make test
+
+# Tests de integración
+make test-integration
+
+# Tests E2E
+make test-e2e
+
 # Todos los tests
-docker compose exec app pytest
+make test-all
+
+# Linting
+make lint
+make lint-fix
+```
+
+### Sobre testcontainers
+
+Los tests de integración y E2E usan **testcontainers** para levantar un contenedor PostgreSQL real:
+
+- El contenedor se levanta una vez por sesión de pytest (session-scoped)
+- Se crean las tablas automáticamente antes de cada test
+- Los datos se limpian después de cada test (auto-cleanup)
+- El contenedor se destruye al finalizar la sesión
+
+**Requisitos para testcontainers:**
+- Docker Engine running
+- Privilegios para crear contenedores (docker group o sudo)
+- ~30 segundos extra en la primera ejecución (descarga imagen PostgreSQL)
+
+### Troubleshooting
+
+```bash
+# Si fallan tests por "server closed the connection":
+# - Es normal, el pool de conexiones se cierra al limpiar
+
+# Si testcontainers no levanta:
+docker ps                    # Verificar Docker está corriendo
+docker run hello-world      # Testear permisos
+
+# Para debuggear un test específico:
+docker compose exec app pytest src/tests/path/to/test.py::test_name -v --tb=long
 ```
 
 ## 🗂️ Estructura del Proyecto
