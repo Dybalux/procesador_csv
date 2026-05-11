@@ -9,7 +9,6 @@ from __future__ import annotations
 import csv
 import os
 from collections.abc import Iterable
-from typing import IO
 
 from domain.ports import FileStorage
 from infrastructure.config.settings import settings

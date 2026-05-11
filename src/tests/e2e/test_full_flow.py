@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import os
 import sys
-from uuid import uuid4
 
 import pytest
 
-from domain.entities import ProcessingTask, TaskStatus
-from domain.value_objects import Email, SubscriptionDate, Url
+from domain.entities import TaskStatus
 
 
 def _make_full_flow_setup(tmp_path):
@@ -23,16 +21,11 @@ def _make_full_flow_setup(tmp_path):
             del sys.modules[key]
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
+    from sqlalchemy.orm import sessionmaker
+
     from infrastructure.db.connection import Base, engine
-    from infrastructure.db.repositories import (
-        SQLAlchemyCustomerRepository,
-        SQLAlchemyErrorRepository,
-        SQLAlchemyTaskRepository,
-    )
-    from infrastructure.db.uow import SQLAlchemyUnitOfWork
     from infrastructure.storage.csv_mappers import CUSTOMERS_100_MAP
     from infrastructure.storage.local_file_storage import LocalFileStorage
-    from sqlalchemy.orm import sessionmaker
 
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)

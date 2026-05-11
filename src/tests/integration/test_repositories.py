@@ -13,6 +13,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+# Importar modelos para registrar metadata
+import infrastructure.db.models  # noqa: F401
 from domain.entities import Customer, ProcessingTask, RowValidationError, TaskStatus
 from domain.value_objects import Email, SubscriptionDate, Url
 from infrastructure.db.connection import Base
@@ -21,9 +23,6 @@ from infrastructure.db.repositories import (
     SQLAlchemyErrorRepository,
     SQLAlchemyTaskRepository,
 )
-
-# Importar modelos para registrar metadata
-import infrastructure.db.models  # noqa: F401
 
 
 @pytest.fixture

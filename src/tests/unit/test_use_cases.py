@@ -15,7 +15,7 @@ from application.interfaces import TaskStatusDTO
 from application.use_cases.get_task_status import GetTaskStatus
 from application.use_cases.process_chunk import ChunkResult, ProcessChunk
 from application.use_cases.upload_csv import UploadCSV
-from domain.entities import ProcessingTask, RowValidationError, TaskStatus
+from domain.entities import ProcessingTask, TaskStatus
 from domain.exceptions import TaskNotFound
 from domain.validation_rules import DateRule, EmailRule, UrlRule
 from tests.unit.fakes import (

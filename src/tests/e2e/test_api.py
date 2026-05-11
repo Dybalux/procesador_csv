@@ -14,8 +14,6 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from domain.entities import ProcessingTask, TaskStatus
-
 
 def _make_e2e_app(tmp_path):
     """Crea app FastAPI con DB SQLite en memoria y storage temporal."""

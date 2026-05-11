@@ -23,8 +23,8 @@ def _make_app():
 
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-    from infrastructure.web.main import create_app
     from infrastructure.web.dependencies import get_file_storage, get_task_repo
+    from infrastructure.web.main import create_app
 
     app = create_app()
     return app, get_task_repo, get_file_storage

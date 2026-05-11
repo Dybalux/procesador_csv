@@ -12,13 +12,13 @@ from uuid import UUID
 from application.use_cases.process_chunk import ProcessChunk
 from domain.validation_rules import DateRule, EmailRule, UrlRule
 from infrastructure.celery.config import celery_app
+from infrastructure.config.settings import settings
 from infrastructure.db.repositories import (
     SQLAlchemyCustomerRepository,
     SQLAlchemyErrorRepository,
     SQLAlchemyTaskRepository,
 )
 from infrastructure.db.uow import SQLAlchemyUnitOfWork
-from infrastructure.config.settings import settings
 from infrastructure.storage.csv_mappers import CUSTOMERS_100_MAP
 from infrastructure.storage.local_file_storage import LocalFileStorage
 

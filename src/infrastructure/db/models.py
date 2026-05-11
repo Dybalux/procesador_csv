@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, JSON, String
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infrastructure.db.connection import Base

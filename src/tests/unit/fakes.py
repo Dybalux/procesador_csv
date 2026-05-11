@@ -11,13 +11,6 @@ from typing import Any
 from uuid import UUID
 
 from domain.entities import Customer, ProcessingTask, RowValidationError
-from domain.ports import (
-    CustomerRepository,
-    ErrorRepository,
-    FileStorage,
-    TaskRepository,
-    UnitOfWork,
-)
 
 
 class FakeTaskRepository:

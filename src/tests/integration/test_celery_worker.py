@@ -14,7 +14,6 @@ from uuid import uuid4
 import pytest
 
 from domain.entities import ProcessingTask, TaskStatus
-from domain.value_objects import Email, SubscriptionDate, Url
 
 
 def _make_celery_task(tmp_path):
@@ -24,10 +23,11 @@ def _make_celery_task(tmp_path):
             del sys.modules[key]
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
+    from sqlalchemy.orm import sessionmaker
+
     from infrastructure.celery.tasks import process_csv_chunk
     from infrastructure.db.connection import Base, engine
     from infrastructure.storage.csv_mappers import CUSTOMERS_100_MAP
-    from sqlalchemy.orm import sessionmaker
 
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
@@ -98,11 +98,12 @@ class TestProcessCSVChunk:
         assert result["valid_count"] == 2
         assert result["error_count"] == 0
 
+        from sqlalchemy.orm import sessionmaker
+
         from infrastructure.db.repositories import (
             SQLAlchemyCustomerRepository,
             SQLAlchemyErrorRepository,
         )
-        from sqlalchemy.orm import sessionmaker
 
         Session = sessionmaker(bind=engine)
         fresh_session = Session()
@@ -150,11 +151,12 @@ class TestProcessCSVChunk:
         assert result["valid_count"] == 0
         assert result["error_count"] == 2
 
+        from sqlalchemy.orm import sessionmaker
+
         from infrastructure.db.repositories import (
             SQLAlchemyCustomerRepository,
             SQLAlchemyErrorRepository,
         )
-        from sqlalchemy.orm import sessionmaker
 
         Session = sessionmaker(bind=engine)
         fresh_session = Session()

@@ -12,7 +12,7 @@ from datetime import date
 from typing import Any
 from uuid import UUID, uuid4
 
-from domain.entities import Customer, ProcessingTask, RowValidationError, TaskStatus
+from domain.entities import Customer, RowValidationError, TaskStatus
 from domain.exceptions import TaskNotFound, ValidationFailed
 from domain.ports import (
     CustomerRepository,
