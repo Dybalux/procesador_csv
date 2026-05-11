@@ -35,14 +35,11 @@ def detect_header_mapping(headers: list[str]) -> dict[str, str] | None:
     # Normalizar headers: lowercase, strip, replace spaces with underscores
     normalized = {h: h.lower().strip().replace(" ", "_") for h in headers}
 
-    # Verificar si ya están en formato correcto
-    if all(norm in REQUIRED_FIELDS for norm in normalized.values() if norm in REQUIRED_FIELDS):
-        # Si TODOS los required fields están presentes sin transformación
-        present_required = set(normalized.values()) & REQUIRED_FIELDS
-        if present_required == REQUIRED_FIELDS:
-            return None  # No mapping needed
+    # Verificar si ya están exactamente en formato correcto
+    if set(headers) == REQUIRED_FIELDS:
+        return None  # No mapping needed - headers already match exactly
 
-    # Intentar crear mapping automático
+    # Intentar crear mapping automático para campos requeridos
     mapping: dict[str, str] = {}
     for original, norm in normalized.items():
         if norm in REQUIRED_FIELDS:
