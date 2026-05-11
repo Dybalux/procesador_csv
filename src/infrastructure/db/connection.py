@@ -16,11 +16,20 @@ class Base(DeclarativeBase):
     """Base declarativa para todos los modelos ORM."""
 
 
+# SQLite usa SingletonThreadPool que no soporta pool_size/max_overflow/pool_timeout
+_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+
 engine = create_engine(
     settings.DATABASE_URL,
     echo=settings.DB_ECHO,
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_timeout=settings.DB_POOL_TIMEOUT,
+    **(
+        {}
+        if _is_sqlite
+        else {
+            "pool_size": settings.DB_POOL_SIZE,
+            "max_overflow": settings.DB_MAX_OVERFLOW,
+            "pool_timeout": settings.DB_POOL_TIMEOUT,
+        }
+    ),
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

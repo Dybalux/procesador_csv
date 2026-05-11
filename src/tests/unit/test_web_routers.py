@@ -19,14 +19,17 @@ def _make_app():
     # Force reimport of infrastructure modules with SQLite config
     for key in list(sys.modules.keys()):
         if (
-            key.startswith("infrastructure.web")
-            or key.startswith("infrastructure.db")
-            or key.startswith("api.v1")
+            key.startswith("infrastructure")
+            or key.startswith("api")
+            or key.startswith("application")
         ):
             del sys.modules[key]
 
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+    os.environ["CELERY_BROKER_URL"] = "redis://localhost:6379/0"
 
+    # Import in correct order to ensure dependencies are loaded
+    from infrastructure.db import connection  # noqa: F401
     from infrastructure.web.dependencies import get_file_storage, get_task_repo
     from infrastructure.web.main import create_app
 
