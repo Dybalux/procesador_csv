@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 
 from application.interfaces import UploadResponse
 from application.use_cases.upload_csv import UploadCSV
 from domain.ports import FileStorage, TaskRepository
+from infrastructure.celery.tasks import CHUNK_SIZE, process_csv_chunk
 from infrastructure.web.dependencies import get_file_storage, get_task_repo
 
 router = APIRouter()
@@ -46,4 +50,13 @@ def upload_csv(
 
     use_case = UploadCSV(file_storage, task_repo)
     task_id = use_case(content, file.filename)
+
+    # Calcular número de chunks y encolar automáticamente
+    file_like = io.StringIO(content.decode("utf-8"))
+    row_count = sum(1 for _ in csv.DictReader(file_like))
+    total_chunks = (row_count + CHUNK_SIZE - 1) // CHUNK_SIZE
+
+    for chunk_offset in range(0, row_count, CHUNK_SIZE):
+        process_csv_chunk.delay(str(task_id), chunk_offset)
+
     return UploadResponse(task_id=task_id)
