@@ -39,3 +39,9 @@ redis_data/
 
 # Dataset de trabajo
 customers-100.csv
+
+# OpenCode metadata
+.atl/
+
+# Python package metadata
+*.egg-info/
